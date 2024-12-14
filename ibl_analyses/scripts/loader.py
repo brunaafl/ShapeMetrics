@@ -19,7 +19,9 @@ from typing import Dict
 import warnings
 import ray
 import tqdm
-import ibl_analyses.scripts.utils as utils
+#import ibl_analyses.scripts.utils as utils
+import utils
+
 import jax
 
 jax.config.update("jax_platform_name", "cpu")
