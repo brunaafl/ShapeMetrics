@@ -135,8 +135,9 @@ axes[2].tick_params("both", labelsize=8, pad=1, length=1)
 fig.subplots_adjust(top=.98, bottom=.1, left=.02, right=1, hspace=.6)
 bbox = axes[2].get_position()
 axes[2].set_position([bbox.xmin + .25, bbox.ymin, bbox.width - .3, bbox.height])
-axes[2].set_xlabel(r"est. information")
-axes[2].set_ylabel(r"true information", labelpad=0)
+axes[2].set_xlabel("est. information\n(3 nearest neighbors)")
+axes[2].set_ylabel("true information\n(fisher)", labelpad=0)
+
 
 xl, yl = axes[2].get_xlim(), axes[2].get_ylim()
 axes[2].plot(
@@ -218,6 +219,26 @@ for i in trange(2 * K):
     )
     perm_preds.append(model.predict(R["distmat_perm"][i][train_idx][None, :]))
 
+
+model = KNeighborsRegressor(metric="precomputed", n_neighbors=3)
+
+distmat = R["distmat_perm"][:K][:, :K]
+preds, sqresids = [], []
+for i in trange(K):
+    train_idx = np.array([j for j in range(K) if i != j])
+    model.fit(
+        distmat[train_idx][:, train_idx],
+        R["fish_infos"][train_idx]
+    )
+    pred = model.predict(distmat[i][train_idx][None, :])
+    sqresids.append((pred - R["fish_infos"][i]) ** 2)
+    preds.append(pred)
+
+print(
+    "Rsquared:",
+    1 - np.sum(sqresids) / np.sum((R["fish_infos"][:K] - np.mean(R["fish_infos"][:K])) ** 2)
+)
+
 axes[2].scatter(orth_preds, R["fish_infos"], lw=0, s=10, color='k')
 axes[2].scatter(perm_preds, R["fish_infos"], lw=1, s=10, marker='x')
 axes[2].tick_params("both", labelsize=8, pad=1, length=1)
@@ -229,8 +250,8 @@ bbox = axes[1].get_position()
 axes[1].set_position([bbox.xmin, bbox.ymin - .075, bbox.width, bbox.height])
 bbox = axes[2].get_position()
 axes[2].set_position([bbox.xmin + .25, bbox.ymin, bbox.width - .3, bbox.height])
-axes[2].set_xlabel(r"est. information")
-axes[2].set_ylabel(r"true information", labelpad=0)
+axes[2].set_xlabel("est. information\n(3 nearest neighbors)")
+axes[2].set_ylabel("true information\n(fisher)", labelpad=0)
 
 xl, yl = axes[2].get_xlim(), axes[2].get_ylim()
 axes[2].plot(
@@ -275,7 +296,28 @@ fig.subplots_adjust(bottom=.1, top=.9, right=.95, left=.05)
 fig.savefig("panel_a_colormap.pdf", transparent=True)
 
 
-# plt.close("all")
+
+
+fig = plt.figure(figsize=(4, 2))
+for j, i in enumerate(idx):
+    plt.subplot(4, 1, j+1)
+    [plt.plot(R["animals"][i][:,j],clip_on=False,lw=1) for j in range(0,100,20)]
+    plt.ylim(-0.5, 1)
+    plt.axis('off')
+
+fig.savefig("TCs.pdf", transparent=True)
+
+
+fig = plt.figure(figsize=(4, 2))
+for j, i in enumerate(idx):
+    plt.subplot(4, 1, j+1)
+    [plt.plot(R["rotated_animals"][i][:,j],clip_on=False,lw=1) for j in range(0,100,20)]
+    plt.ylim(-0.5, 1)
+    plt.axis('off')
+
+fig.savefig("TCs_rotated.pdf", transparent=True)
+
+plt.show()
 
 # THETAS = np.linspace(-np.pi, np.pi, 300)
 # RS = RandomState(1234)

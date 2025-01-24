@@ -13,7 +13,7 @@ from netrep.metrics import LinearMetric, PermutationMetric
 from netrep.multiset import pairwise_distances
 
 # Specify path to data.
-DATAPATH = "/mnt/home/awilliams/ceph/netrep-data/allen-brain"
+DATAPATH = "./data/"
 
 # Constants.
 MIN_NEURONS = 50
@@ -59,13 +59,13 @@ rot_dists = pairwise_distances(
     LinearMetric(alpha=1.0, score_method="euclidean"),
     Xs
 )
-perm_dists = pairwise_distances(
-    PermutationMetric(score_method="euclidean"),
-    Xs
-)
+# perm_dists = pairwise_distances(
+#     PermutationMetric(score_method="euclidean"),
+#     Xs
+# )
 
 # Perform multi-dimensional scaling.
-for title, dists in zip(("Procrustes", "Permutation"), (rot_dists, perm_dists)):
+for title, dists in zip(("Procrustes", "Permutation"), (rot_dists)):
     print("Performing MDS...")
     embedding = MDS(
         n_components=50,

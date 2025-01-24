@@ -4,7 +4,7 @@ import numpy as np
 from allensdk.brain_observatory.ecephys.ecephys_project_cache import EcephysProjectCache
 
 # Specify path to data.
-DATAPATH = "/mnt/home/awilliams/ceph/netrep-data/allen-brain"
+DATAPATH = "data/"
 
 # Add path to save data summaries.
 if not os.path.exists(
@@ -33,6 +33,8 @@ tree = rspc.get_structure_tree(structure_graph_id=1)
 sess_table = data_cache.get_session_table()
 sess_table = sess_table[(sess_table["session_type"] == "brain_observatory_1.1")]
 
+print("total of %i sessions" % len(sess_table.index.values))
+
 # Extract responses for natural movies and static gratings.
 for stim_name, stim_duration in [
         ("natural_movie_three", 0.033355),
@@ -51,7 +53,7 @@ for stim_name, stim_duration in [
 
         # Load session.
         session = data_cache.get_session_data(sess_id)
-
+        continue
         # Collect units.
         units = session.units.dropna(subset=[
             "anterior_posterior_ccf_coordinate",
@@ -111,7 +113,7 @@ for stim_name, stim_duration in [
         ), **sess_plus_cell_ids
     )
 
-    # Save stimulus condition ids.
+    #Save stimulus condition ids.
     np.save(
         os.path.join(
             DATAPATH, "extracted_data", f"{stim_name}_stim_conditions.npy"

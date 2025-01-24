@@ -49,11 +49,14 @@ def make_tuning_curve(offset, sharpness):
     # Apply offset modulo 2 * pi
     theta = (THETAS + offset + np.pi) % (2 * np.pi) - np.pi
     # Compute unimodal cosine tuning curve
-    curve = 0.5 + 0.5 * np.cos(np.clip(
-        theta * sharpness, -np.pi, np.pi
+    curve = np.cos(np.clip(
+        THETAS * sharpness, -np.pi, np.pi
     ))
     return curve
 
+import matplotlib.pylab as plt
+
+k
 
 def neural_population(sharpness, concentration):
     offsets = np.sort(
