@@ -6,7 +6,6 @@
 
 import numpy as np
 
-
 from ibllib.atlas.regions import BrainRegions
 from ibllib.atlas import AllenAtlas
 from brainbox.io.one import SpikeSortingLoader
