@@ -6,8 +6,8 @@
 
 import numpy as np
 
-from ibllib.atlas.regions import BrainRegions
-from ibllib.atlas import AllenAtlas
+from iblatlas.regions import BrainRegions
+from iblatlas.atlas import AllenAtlas
 from brainbox.io.one import SpikeSortingLoader
 from one.api import ONE
 import brainbox
