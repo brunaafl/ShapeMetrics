@@ -39,7 +39,7 @@ good_eids = [
 ]
 
 params = {
-    'file': '../../../Data/',
+    'file': '../data/', #'../../../Data/',
     'tag': '2022_Q2_IBL_et_al_RepeatedSite',
     'probe': 'probe00',
     'sessions': [0,5,6],

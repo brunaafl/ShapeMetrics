@@ -52,11 +52,14 @@ class IBLSession:
         #     cache_dir=cache_dir
         # )
 
+        self.mode = params['mode']
+
         self.one = ONE(
             base_url="https://openalyx.internationalbrainlab.org", 
             password="international", 
-            silent=True, 
-            cache_dir=cache_dir
+            silent=False, 
+            cache_dir=cache_dir,
+            mode=self.mode
         )
         
         self.brain_atlas = AllenAtlas()
@@ -288,12 +291,14 @@ class IBLDataLoader:
 
         cache_dir = Path(params['file'])
         cache_dir = cache_dir / params['tag']
+        self.mode = params['mode'] # so i can check afterwards if local or remote
         one = ONE(
             base_url="https://openalyx.internationalbrainlab.org", 
             username='intbrainlab',
             password="international", 
-            silent=True, 
-            cache_dir=cache_dir
+            silent=False, 
+            cache_dir=cache_dir,
+            mode=self.mode
         )
 
         bwm_sessions = one.alyx.rest(
