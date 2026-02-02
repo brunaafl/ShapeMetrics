@@ -1,7 +1,7 @@
 
 good_eids = [
     'e2b845a1-e313-4a08-bc61-a5f662ed295e',
-    #'111c1762-7908-47e0-9f40-2f2ee55b6505',
+    #'111c1762-7908-47e0-9f40-2f2ee55b6505', 
     '2bdf206a-820f-402f-920a-9e86cd5388a4',
     '5dcee0eb-b34d-4652-acc3-d10afc6eae68',
     'c7bf2d49-4937-4597-b307-9f39cb1c7b16',
@@ -27,8 +27,8 @@ good_eids = [
     '7f6b86f9-879a-4ea2-8531-294a221af5d0',
     '61e11a11-ab65-48fb-ae08-3cb80662e5d6',
     'c7248e09-8c0d-40f2-9eb4-700a8973d8c8',
-    'f312aaec-3b6f-44b3-86b4-3a0c119c0438',
-    'dda5fc59-f09a-4256-9fb5-66c67667a466',
+    'f312aaec-3b6f-44b3-86b4-3a0c119c0438', 
+    'dda5fc59-f09a-4256-9fb5-66c67667a466', # might be breaking also
     'db4df448-e449-4a6f-a0e7-288711e7a75a',
     'ecb5520d-1358-434c-95ec-93687ecd1396',
     'ee40aece-cffd-4edb-a4b6-155f158c666a',
@@ -37,6 +37,7 @@ good_eids = [
     # 'e9b57a5a-b06d-476d-ad20-7ec42a16f5f5',
     '4b7fbad4-f6de-43b4-9b15-c7c7ef44db4b'
 ]
+
 
 params = {
     'file': '../data/', #'../../../Data/',

@@ -4,6 +4,7 @@
 @author: Amin
 """
 
+import os
 import numpy as np
 
 from iblatlas.regions import BrainRegions
@@ -30,7 +31,7 @@ warnings.filterwarnings(
     category=DeprecationWarning
 )
 
-
+os.environ['REVISION_LAST_BEFORE'] = '2024-09-16'
 # %%
 class IBLSession:
     def __init__(self,params):
@@ -76,11 +77,11 @@ class IBLSession:
         assert len(clusters['cluster_id']) == len(np.unique(clusters['cluster_id']))
         return
 
-
+    
     def load_session(self):
         if self.params["verbose"]: print("loading session: ", self.eid)
         
-        trials = self.one.load_object(self.eid,'trials',collection='alf')
+        trials = self.one.load_object(self.eid,'trials',collection='alf', revision="2022-09-16")
         try:
             sl = SpikeSortingLoader(
                 eid=self.eid, 
@@ -88,11 +89,14 @@ class IBLSession:
                 one=self.one, 
                 atlas=self.brain_atlas
             )
-            spikes, clusters, channels = sl.load_spike_sorting()
+            print("Loading spike sorting for session ", self.eid)
+
+            spikes, clusters, channels = sl.load_spike_sorting(revision="2022-09-16", good_units=True)  # enforce_version=True was breaking it... , good_units=True alo breaks it 
             clusters = sl.merge_clusters(spikes, clusters, channels)
             self.check_rep(spikes, clusters)
             probe_data = dict(spikes=spikes, clusters=clusters, channels=channels)
         except:
+            print(f"Could not load spike sorting for session {self.eid}")
             probe_data = []
         
         self.data = {'trials':trials,self.params['probe']:probe_data}
@@ -101,7 +105,6 @@ class IBLSession:
     
     def load_session_data(self):
         if self.params["verbose"]: print("loading session data: ", self.eid)
-        
         spikes, clusters, channels = self.data[self.params['probe']].values()
 
         trials = self.data['trials']
@@ -350,8 +353,10 @@ class IBLDataLoader:
         self.sessions = [self.sessions[i] for i in valid]
         self.data = [self.data[i] for i in valid]
 
+        # Save tables to disk cache
+        #one.save_cache(clobber=True)
+        #one.save_loaded_ids()
         
-
 
     def load_train_data(self):
         if self.parallel: 
