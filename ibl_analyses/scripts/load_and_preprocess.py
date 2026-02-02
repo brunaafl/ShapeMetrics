@@ -5,10 +5,10 @@ import sys
 import pickle
 
 import utils
-import loader
+import loader_modif
 import tqdm
 import imp
-imp.reload(loader)
+imp.reload(loader_modif)
 import setup
 import scipy.stats as sts
 from matplotlib import pyplot as plt
@@ -80,7 +80,7 @@ params = {
     'mode':'remote' ## Local or remote. Remote if testing
     }
 
-dataloader = loader.IBLDataLoader(
+dataloader = loader_modif.IBLDataLoader(
          params,eids=setup.good_eids
 )
 

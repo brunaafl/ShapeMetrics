@@ -4,8 +4,8 @@
 @author: Amin
 """
 
+import os
 import numpy as np
-
 
 from iblatlas.regions import BrainRegions
 from iblatlas.atlas import AllenAtlas
@@ -31,7 +31,7 @@ warnings.filterwarnings(
     category=DeprecationWarning
 )
 
-
+os.environ['REVISION_LAST_BEFORE'] = '2024-09-16'
 # %%
 class IBLSession:
     def __init__(self,params):
@@ -58,7 +58,7 @@ class IBLSession:
         self.one = ONE(
             base_url="https://openalyx.internationalbrainlab.org", 
             password="international", 
-            silent=True, 
+            silent=False, 
             cache_dir=cache_dir,
             mode=self.mode
         )
@@ -77,11 +77,11 @@ class IBLSession:
         assert len(clusters['cluster_id']) == len(np.unique(clusters['cluster_id']))
         return
 
-
+    
     def load_session(self):
         if self.params["verbose"]: print("loading session: ", self.eid)
         
-        trials = self.one.load_object(self.eid,'trials',collection='alf')
+        trials = self.one.load_object(self.eid,'trials',collection='alf', revision="2024-09-16")
         try:
             sl = SpikeSortingLoader(
                 eid=self.eid, 
@@ -89,20 +89,57 @@ class IBLSession:
                 one=self.one, 
                 atlas=self.brain_atlas
             )
-            spikes, clusters, channels = sl.load_spike_sorting()
+            print("Loading spike sorting for session ", self.eid)
+
+            spikes, clusters, channels = sl.load_spike_sorting(revision="2024-09-16")  # enforce_version=True was breaking it... , good_units=True alo breaks it 
+            
+            """try:
+                spikes, clusters = self.legacy_unit_qc_filter(spikes, clusters)
+                print(f"Applied legacy QC: kept {len(np.unique(spikes.clusters))} clusters for {self.eid}")
+            except Exception as exc:
+                print(f"Legacy QC failed for {self.eid}: {exc}; keeping raw data")"""
+                
             clusters = sl.merge_clusters(spikes, clusters, channels)
             self.check_rep(spikes, clusters)
             probe_data = dict(spikes=spikes, clusters=clusters, channels=channels)
         except:
+            print(f"Could not load spike sorting for session {self.eid}")
             probe_data = []
         
         self.data = {'trials':trials,self.params['probe']:probe_data}
         return self.data
     
-    
+    def legacy_unit_qc_filter(self, spikes, clusters):
+        """
+        Reproduce legacy IBL server QC pass/fail logic.
+
+        - Use bitwise_fail computed by spike_sorting_metrics.
+        - Keep only units with bitwise_fail == 0.
+        """
+        # Compute unit metrics
+        df_units, _ = brainbox.metrics.single_units.spike_sorting_metrics(
+            times=spikes.times,
+            clusters=spikes.clusters,
+            amps=spikes.get('amps', None),
+            depths=spikes.get('depths', None),
+            cluster_ids=clusters['cluster_id']
+        )
+
+        # Filter passing units where bitwise_fail == 0
+        good = df_units['bitwise_fail'] == 0
+        good_ids = df_units.index[good].values
+
+        # Filter clusters table
+        clusters_filtered = clusters[clusters['cluster_id'].isin(good_ids)]
+
+        # Filter spikes
+        mask = np.isin(spikes.clusters, good_ids)
+        spikes_filtered = spikes[mask]
+
+        return spikes_filtered, clusters_filtered
+
     def load_session_data(self):
         if self.params["verbose"]: print("loading session data: ", self.eid)
-        
         spikes, clusters, channels = self.data[self.params['probe']].values()
 
         print('Len clusters: ', len(clusters))
@@ -304,6 +341,12 @@ class IBLDataLoader:
             mode=self.mode
         )
 
+        if self.mode != 'local':
+            print("Refreshing local cache tables...")
+            # This downloads sessions.pqt and datasets.pqt to cache_dir 
+            # It is important for me to be able to load form remote 
+            one.load_cache(tag='2022_Q2_IBL_et_al_RepeatedSite')
+
         bwm_sessions = one.alyx.rest(
             'sessions', 'list', dataset_types='spikes.times', tag=params['tag']
         )
@@ -311,6 +354,8 @@ class IBLDataLoader:
         df = pd.DataFrame(bwm_sessions)
         if eids is None:
             eids = list(df['id']) if params['sessions'] is None else [list(df['id'])[s] for s in params['sessions']]
+
+        # Filter 
 
         self.eids = eids
         self.probe = params['probe']
@@ -346,11 +391,17 @@ class IBLDataLoader:
             self.data = [sess.load_session() for sess in self.sessions]
             [sess.load_session_data() for sess in self.sessions]
 
+            
+
         valid = [i for i in range(len(self.data)) if bool(self.data[i][params['probe']])]
         self.eids = [eids[i] for i in valid]
         self.sessions = [self.sessions[i] for i in valid]
         self.data = [self.data[i] for i in valid]
 
+        # Save tables to disk cache
+        #one.save_cache(clobber=True)
+        #one.save_loaded_ids()
+        
 
     def load_train_data(self):
         if self.parallel: 
