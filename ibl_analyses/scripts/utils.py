@@ -72,3 +72,14 @@ def create_adjacency(x):
     dist[dist != 1] = 0
     return dist
 
+# %%
+def filter_eids(QC_json, criteria='PASS'):
+    with open(QC_json, 'r') as f:
+        import json
+        QC_data = json.load(f)
+    
+    eids = []
+    for QC_eid in QC_data:
+        if QC_eid['qc_outcome'] == criteria:
+            eids.append(QC_eid['eid'])
+    return eids
