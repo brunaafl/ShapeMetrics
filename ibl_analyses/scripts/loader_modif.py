@@ -152,14 +152,15 @@ class IBLSession:
             np.nan_to_num(np.c_[trials['contrastLeft'], trials['contrastRight']])
         )*100
 
+        # Select contrast of the used trials
+        #contrast = contrast[trial_indices]
+        contrast = contrast[trial_indices]
+
         contrasts, indices, counts = np.unique(
             contrast,axis=0,
             return_inverse=True,
             return_counts=True
         )
-        # Select contrast of the used trials
-        #contrast = contrast[trial_indices]
-        contrast = contrast[trial_indices].flatten()
 
         n_trials = min(counts) # get, for each condition, the min number of trials
 
@@ -169,21 +170,7 @@ class IBLSession:
 
         # Optimizing the array construction
         if self.params['bins_as_conds']:
-            """
-            # Andrew's code
-            n_trials = np.array([sum(contrast == c) for c in contrasts])
-            print(n_trials)
-            padding = max(n_trials) - n_trials
-            print(y.shape)
-            print(contrasts.shape)
 
-            y = np.dstack(np.array(
-                [np.array([
-                    np.vstack((yx, np.full((padding[c],self.params['n_bins']), np.nan))) 
-                    for yx in y[contrast==contrasts[c],:,:].transpose(1,0,2)])
-                    for c in range(len(contrasts))])).transpose(1, 2, 0)
-
-            """
             # Optimized, but trying Andrew's version
             y_aux = np.zeros((n_conditions*n_time_bins, n_trials, n_neurons))
 
