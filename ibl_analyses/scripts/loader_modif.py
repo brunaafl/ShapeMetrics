@@ -179,20 +179,17 @@ class IBLSession:
                 [np.array([
                     np.vstack((yx, np.full((padding[c],self.params['n_bins']), np.nan))) 
                     for yx in y[contrast==contrasts[c],:,:].transpose(1,0,2)])
-                    for c in range(len(contrasts))])).transpose(1, 2, 0)
+                    for c in range(len(contrasts))])).transpose(1, 2, 0)     
 
-        
+            print(y.shape)   
 
         else:
 
-            y_aux = np.zeros((n_conditions, n_trials, n_neurons, n_time_bins))
-            
-            for i in range(n_conditions):
-                cond_indices = np.where(indices == i)[0][:n_trials]
-                # Fill trials and neurons, keep time bins last for now
-                y_aux[i, :, :, :] = y[cond_indices, :, :].transpose(0, 2, 1)
-
-            y = y_aux.transpose(1, 0, 3, 2)
+            y = np.array([
+                    [y[j]
+                    for j in np.where(indices==i)[0][:n_trials].tolist()] 
+                    for i in range(contrasts.shape[0])]
+                ).transpose(1,0,3,2)
                 
         reaction_times = list_to_array([
             [reaction_times[j]
@@ -245,13 +242,6 @@ class IBLSession:
         self.reaction_times = reaction_times
         self.correct = correct
         self.regions = acronym_beryl[acronym_bool]
-
-        ## After this process, data is still stored but not used ##
-        # Deleat it to optimize RAM usage
-        #print( 'Deleting useless data...')
-
-        #if hasattr(self, 'data'):
-        #    del self.data
 
         gc.collect()
 
@@ -508,6 +498,9 @@ def split_data_cv(data,props,seeds):
     return out
 
 def list_to_array(list):
+    # From Andrew's code
+    # He gets the maximum number of trials and completes the minimum with nans
+
     max_len = max(len(row) for row in list)
 
     for i in range(len(list)):
