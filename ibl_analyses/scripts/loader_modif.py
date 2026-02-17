@@ -32,7 +32,7 @@ warnings.filterwarnings(
     category=DeprecationWarning
 )
 
-#os.environ['REVISION_LAST_BEFORE'] = '2022-09-16'
+os.environ['REVISION_LAST_BEFORE'] = '2022-09-16'
 # %%
 class IBLSession:
     def __init__(self,params):
@@ -82,7 +82,7 @@ class IBLSession:
     def load_session(self):
         if self.params["verbose"]: print("loading session: ", self.eid)
         
-        trials = self.one.load_object(self.eid,'trials',collection='alf')
+        trials = self.one.load_object(self.eid,'trials',collection='alf',revision='2022-09-16')
         try:
             sl = SpikeSortingLoader(
                 eid=self.eid, 
@@ -92,7 +92,7 @@ class IBLSession:
             )
             #print("Loading spike sorting for session ", self.eid)
 
-            spikes, clusters, channels = sl.load_spike_sorting()  # enforce_version=True was breaking it... , good_units=True alo breaks it 
+            spikes, clusters, channels = sl.load_spike_sorting(revision='2022-09-16')  # enforce_version=True was breaking it... , good_units=True alo breaks it 
             
             # TODO: maybe try to recompute cluster metrics in one specific data and see if impacts on smth
             clusters = sl.merge_clusters(spikes, clusters, channels)
@@ -214,44 +214,12 @@ class IBLSession:
         
         x = np.array([[x_,t_] for x_ in contrasts.squeeze() for t_ in t])
 
-        #y = np.sqrt(
-        #    y[:,:,np.argsort(y.mean(0).var(0))[::-1]]
-        #)
 
         if self.params['n_trials'] is not None:
             y = y[:self.params['n_trials']]
         
         if self.params['n_neurons'] is not None:
             y = y[:,:,:self.params['n_neurons']]
-
-        if self.params['bins_as_conds']:
-
-            self.data = split_data_cv({
-                    'y':y,
-                    'reaction_times':reaction_times[:self.params['n_trials'],:],
-                    'correct':correct[:self.params['n_trials'],:],
-                },
-                self.params['props'],
-                self.params['seeds']
-            )
-        else:
-            
-            keys = ['y_train', 'y_test', 'y_validation', 'reaction_times_train', 
-                    'reaction_times_test', 'reaction_times_validation', 'correct_train', 
-                    'correct_test', 'correct_validation'] # nasty, improve this
-            
-            self.data = {key: [] for key in keys}
-            for ti in range(len(t)):
-                cv_data = split_data_cv({
-                        'y':y[:,:,ti],
-                        'reaction_times':reaction_times[:self.params['n_trials'],:],
-                        'correct':correct[:self.params['n_trials'],:],
-                    },
-                    self.params['props'],
-                    self.params['seeds']
-                )
-                for k in keys:
-                    self.data[k].append(cv_data[k])
             
         self.y = y
         self.x = x
@@ -263,15 +231,24 @@ class IBLSession:
         # Deleat it to optimize RAM usage
         #print( 'Deleting useless data...')
 
-        #if hasattr(self, 'data'):
-        #    del self.data
+        self.data = {
+            'y': y,
+            'reaction_times': reaction_times,
+            'correct': correct,
+            'regions': self.regions,
+            'x': x
+        }
 
         gc.collect()
 
         ## ADDED NOW TO SAVE REGIONS INFORMATION -- DOUBLE CHECK
         #self.regions = acronym_beryl[acronym_bool]
         
-    def new_fold(self,seeds=None):
+    def new_fold(self, seeds=None):
+        """
+        Generate a new fold if cross-validation
+        """
+
         # TODO: Might be better to enforce the user to determine the seed
         if seeds is None:
             seeds = {
@@ -308,6 +285,11 @@ class IBLSession:
                 for k in keys:
                     self.data[k].append(cv_data[k])
 
+    ## Aded in case of no cross-validation
+    def load_data(self):
+        return self.x, self.data['y'], self.data['reaction_times'], self.data['correct'], self.regions
+
+    # Helper method for cross-validation
     def load_train_data(self):
         return self.x, self.data['y_train'], self.data['reaction_times_train'], self.data['correct_train'], self.regions
 
@@ -395,13 +377,7 @@ class IBLDataLoader:
 
         else:
             # Uploading this logic for better performance (try)
-            """self.sessions = [
-                IBLSession(
-                    {**params,**{'eid':eid}}
-                ) for eid in eids
-            ]
-            self.data = [sess.load_session() for sess in self.sessions]            
-            [sess.load_session_data() for sess in self.sessions]"""
+
             self.sessions = []
             self.eids = []
             for eid in tqdm.tqdm(eids, "Loading session"):
@@ -410,9 +386,6 @@ class IBLDataLoader:
                 sess = IBLSession({**params,**{'eid':eid}})
 
                 sess.load_session()
-
-                #print(sess.data.keys())
-                #print(sess.data.keys())
 
                 if bool(sess.data[params['probe']]): 
                     self.sessions.append(sess)
@@ -424,15 +397,12 @@ class IBLDataLoader:
 
                 gc.collect()
 
-        """valid = [i for i in range(len(self.data)) if bool(self.data[i][params['probe']])]
-        self.eids = [eids[i] for i in valid]
-        self.sessions = [self.sessions[i] for i in valid]
-        self.data = [self.data[i] for i in valid]"""
-
         self.data = None 
         #self.eids = [s.eid for s in self.sessions]
         print(f"Successfully loaded {len(self.sessions)} sessions.")
     
+    def load_data(self):
+        return [sess.load_data() for sess in self.sessions]
 
     def load_train_data(self):
         if self.parallel: 
@@ -472,6 +442,15 @@ class IBLDataLoader:
             all_test_data.append(self.load_test_data())
 
         return all_train_data, all_test_data
+    
+    def get_folds(self, n_folds=10, seeds=None):
+            # Memory-efficient generator..
+
+            for i in range(n_folds):
+                [sess.new_fold(seeds) for sess in self.sessions]
+                
+                # The script will process this and discard it before the next loop
+                yield self.load_train_data(), self.load_test_data()
     
     def generate_folds(self, n_folds=10, seeds=None):
             # Memory-efficient generator..
