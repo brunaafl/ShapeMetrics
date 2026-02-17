@@ -32,7 +32,7 @@ warnings.filterwarnings(
     category=DeprecationWarning
 )
 
-os.environ['REVISION_LAST_BEFORE'] = '2022-09-16'
+#os.environ['REVISION_LAST_BEFORE'] = '2022-09-16'
 # %%
 class IBLSession:
     def __init__(self,params):
@@ -82,7 +82,7 @@ class IBLSession:
     def load_session(self):
         if self.params["verbose"]: print("loading session: ", self.eid)
         
-        trials = self.one.load_object(self.eid,'trials',collection='alf',revision='2022-09-16')
+        trials = self.one.load_object(self.eid,'trials',collection='alf')
         try:
             sl = SpikeSortingLoader(
                 eid=self.eid, 
@@ -90,9 +90,10 @@ class IBLSession:
                 one=self.one, 
                 atlas=self.brain_atlas
             )
-            #print("Loading spike sorting for session ", self.eid)
+            
+            print("Loading spike sorting for session ", self.eid)
 
-            spikes, clusters, channels = sl.load_spike_sorting(revision='2022-09-16')  # enforce_version=True was breaking it... , good_units=True alo breaks it 
+            spikes, clusters, channels = sl.load_spike_sorting()  # enforce_version=True was breaking it... , good_units=True alo breaks it 
             
             # TODO: maybe try to recompute cluster metrics in one specific data and see if impacts on smth
             clusters = sl.merge_clusters(spikes, clusters, channels)
@@ -402,7 +403,7 @@ class IBLDataLoader:
         print(f"Successfully loaded {len(self.sessions)} sessions.")
     
     def load_data(self):
-        return [sess.load_data() for sess in self.sessions]
+        return zip(*[sess.load_data() for sess in self.sessions])
 
     def load_train_data(self):
         if self.parallel: 
