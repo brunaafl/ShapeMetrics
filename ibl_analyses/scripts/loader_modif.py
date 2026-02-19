@@ -32,7 +32,7 @@ warnings.filterwarnings(
     category=DeprecationWarning
 )
 
-#os.environ['REVISION_LAST_BEFORE'] = '2022-09-16'
+#os.environ['REVISION_LAST_BEFORE'] = '2024-05-06'
 # %%
 class IBLSession:
     def __init__(self,params):
