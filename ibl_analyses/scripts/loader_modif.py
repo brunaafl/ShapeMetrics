@@ -258,7 +258,6 @@ class IBLSession:
                 'validation': np.random.randint(0,10000)
             }
         if self.params['bins_as_conds']:
-
             self.data = split_data_cv({
                     'y':self.y,
                     'reaction_times':self.reaction_times[:self.params['n_trials'],:],
@@ -275,6 +274,7 @@ class IBLSession:
             
             self.data = {key: [] for key in keys}
             for ti in range(self.y.shape[2]):
+                # For each time bin, split on 2 folds and concatenate after
                 cv_data = split_data_cv({
                         'y':self.y[:,:,ti],
                         'reaction_times':self.reaction_times[:self.params['n_trials'],:],
@@ -437,29 +437,20 @@ class IBLDataLoader:
     def new_folds(self,n_folds=10,seeds=None):
         all_train_data=[]
         all_test_data=[]
-        for _ in range(n_folds):
+        for i in range(n_folds):
             [sess.new_fold(seeds) for sess in self.sessions]
             all_train_data.append(self.load_train_data())
             all_test_data.append(self.load_test_data())
 
         return all_train_data, all_test_data
-    
-    def get_folds(self, n_folds=10, seeds=None):
-            # Memory-efficient generator..
 
-            for i in range(n_folds):
-                [sess.new_fold(seeds) for sess in self.sessions]
-                
-                # The script will process this and discard it before the next loop
-                yield self.load_train_data(), self.load_test_data()
     
     def generate_folds(self, n_folds=10, seeds=None):
             # Memory-efficient generator..
 
             for i in range(n_folds):
-                [sess.new_fold(seeds) for sess in self.sessions]
                 
-                # The script will process this and discard it before the next loop
+                [sess.new_fold(seeds) for sess in self.sessions]
                 yield self.load_train_data(), self.load_test_data()
     
     def new_folds_avg(self,n_folds=10,seeds=None):
@@ -494,12 +485,16 @@ def split_data_cv(data,props,seeds):
 
     test_trials = trial_indices[-int(props['test']*N):]
 
+    #print("Test indices: ", test_trials)
+
     train_trials = jax.random.choice(
         jax.random.PRNGKey(seeds['validation']),
         shape=(int(N*props['train']),),
         a=trial_indices[:-int(props['test']*N)],
         replace=False
     ).sort()
+
+    #print("Train indices: ", train_trials)
 
     validation_trials = np.setdiff1d(trial_indices[:-int(props['test']*N)],train_trials).tolist()
 
