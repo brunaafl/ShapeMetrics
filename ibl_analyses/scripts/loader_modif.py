@@ -133,11 +133,15 @@ class IBLSession:
         )
         
         # If you pass explicitly the areas, select them
+        acronym_allen = self.data[self.params['probe']]['clusters']['acronym']
+        acronym_beryl = BrainRegions().acronym2acronym(acronym_allen, 'Beryl')
+        
         if self.params['areas'] is not None:
-            acronym_allen = self.data[self.params['probe']]['clusters']['acronym']
-            acronym_beryl = BrainRegions().acronym2acronym(acronym_allen, 'Beryl')
             acronym_bool = np.isin(acronym_beryl, self.params['areas'])
             y = y[:,acronym_bool,:]
+            regions = acronym_beryl[acronym_bool]
+        else:
+            regions = acronym_beryl
 
         reaction_times = trials['response_times'] - trials['stimOn_times']
         correct = trials['feedbackType']
@@ -226,7 +230,7 @@ class IBLSession:
         self.x = x
         self.reaction_times = reaction_times
         self.correct = correct
-        self.regions = acronym_beryl[acronym_bool]
+        self.regions = regions
 
         ## After this process, data is still stored but not used ##
         # Deleat it to optimize RAM usage
@@ -242,9 +246,6 @@ class IBLSession:
 
         gc.collect()
 
-        ## ADDED NOW TO SAVE REGIONS INFORMATION -- DOUBLE CHECK
-        #self.regions = acronym_beryl[acronym_bool]
-        
     def new_fold(self, seeds=None):
         """
         Generate a new fold if cross-validation
@@ -505,3 +506,17 @@ def split_data_cv(data,props,seeds):
         out[k+'_validation'] = data[k][validation_trials,...]
     
     return out
+
+# %%
+# Find the Experiment/Session IDs (eids) corresponding to the tag of interest
+# Notice that this is different from the pids (the probe ids) which are the inserted probes
+# The probes you find doing one.searh_insertion(tag= ...) -> my first mistake 
+
+def find_eids(one, tag):
+    bwm_sessions = one.alyx.rest(
+        'sessions', 'list', dataset_types='spikes.times', tag=tag
+    )
+
+    df = pd.DataFrame(bwm_sessions)
+    eids = list(df['id'])
+    return eids
