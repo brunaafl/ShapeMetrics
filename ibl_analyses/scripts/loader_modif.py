@@ -6,6 +6,7 @@
 
 import gc
 import os
+import time
 import numpy as np
 
 from iblatlas.regions import BrainRegions
@@ -18,6 +19,7 @@ from pathlib import Path
 import pandas as pd
 from typing import Dict
 import warnings
+import psutil
 import ray
 import tqdm
 #import ibl_analyses.scripts.utils as utils
@@ -66,8 +68,8 @@ class IBLSession:
         
         self.brain_atlas = AllenAtlas()
 
-        self.load_session()
-        self.load_session_data()
+        #self.load_session()
+        #self.load_session_data()
 
     def check_rep(self,spikes,clusters):
          # spikes.clusters provides ids which match clusters['cluster_id']
@@ -81,6 +83,10 @@ class IBLSession:
     
     def load_session(self):
         if self.params["verbose"]: print("loading session: ", self.eid)
+
+        # save data origin
+        details = self.one.get_details(self.eid)
+        self.lab = details['lab']
         
         trials = self.one.load_object(self.eid,'trials',collection='alf')
         try:
@@ -191,7 +197,6 @@ class IBLSession:
             
             y = y_aux.transpose(1,0,2) ## This will be (n_trials, time_bins*conditions, n_neurons)
             
-            print(y.shape)
 
         else:
 
@@ -200,10 +205,12 @@ class IBLSession:
             for i in range(n_conditions):
                 cond_indices = np.where(indices == i)[0][:n_trials]
                 # Fill trials and neurons, keep time bins last for now
-                y_aux[i, :, :, :] = y[cond_indices, :, :].transpose(0, 2, 1)
+                y_aux[i, :, :, :] = y[cond_indices, :, :]
 
-            y = y_aux.transpose(1, 0, 3, 2)
+            y = y_aux.transpose(1, 0, 3, 2) # (n_trials, n_cond, time_bins, n_neurons)
         
+        print(y.shape)
+
         # This works for a constant number of trials 
         reaction_times = np.array([
             [reaction_times[j]
@@ -218,7 +225,6 @@ class IBLSession:
         
         
         x = np.array([[x_,t_] for x_ in contrasts.squeeze() for t_ in t])
-
 
         if self.params['n_trials'] is not None:
             y = y[:self.params['n_trials']]
@@ -269,9 +275,9 @@ class IBLSession:
             )
         else:
             
-            keys = ['y_train', 'y_test', 'y_validation', 'reaction_times_train', 
-                    'reaction_times_test', 'reaction_times_validation', 'correct_train', 
-                    'correct_test', 'correct_validation'] # nasty, improve this
+            keys = ['y_train', 'y_test', 'y_validation', 
+                    'reaction_times_train', 'reaction_times_test', 'reaction_times_validation', 
+                    'correct_train', 'correct_test', 'correct_validation'] # nasty, improve this
             
             self.data = {key: [] for key in keys}
             for ti in range(self.y.shape[2]):
@@ -355,14 +361,17 @@ class IBLDataLoader:
         self.eids = eids
         self.probe = params['probe']
         self.areas = params['areas']
+        self.labs = [] # save lab info
 
         self.parallel = parallel
 
         if parallel:
             ray.init(
                 ignore_reinit_error=True,
-                runtime_env={'working_dir': '../'}
+                runtime_env={'working_dir': '../'},
+                num_cpus=max(1, os.cpu_count() - 1)
             )
+
             self.sessions = [
                 IBLSessionRemote.remote(
                     {**params,**{'eid':eid}}
@@ -392,6 +401,7 @@ class IBLDataLoader:
                 if bool(sess.data[params['probe']]): 
                     self.sessions.append(sess)
                     self.eids.append(eid)
+                    self.labs.append(sess.lab)
                     sess.load_session_data()
                 else:
                     print(f"Skipping empty session {eid}")
@@ -450,8 +460,11 @@ class IBLDataLoader:
             # Memory-efficient generator..
 
             for i in range(n_folds):
-                
+                _log_mem('Track memory usage generating folds')
+                t0 = time.time()
                 [sess.new_fold(seeds) for sess in self.sessions]
+                t1 = time.time()
+                print('Time taken :', t1-t0)
                 yield self.load_train_data(), self.load_test_data()
     
     def new_folds_avg(self,n_folds=10,seeds=None):
@@ -520,3 +533,17 @@ def find_eids(one, tag):
     df = pd.DataFrame(bwm_sessions)
     eids = list(df['id'])
     return eids
+
+# %%
+# Here to investigate the memory usage 
+
+def _human(n):
+    for u in ['B','KB','MB','GB']:
+        if n < 1024.0: return f"{n:3.1f}{u}"
+        n /= 1024.0
+    return f"{n:.1f}TB"
+
+def _log_mem(tag=""):
+    p = psutil.Process(os.getpid())
+    print(f"[MEM] {tag} rss={_human(p.memory_info().rss)} vms={_human(p.memory_info().vms)}")
+
