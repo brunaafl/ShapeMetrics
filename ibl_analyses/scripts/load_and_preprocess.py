@@ -1,6 +1,7 @@
 
 import jax.numpy as jnp
 
+import argparse
 import sys
 import pickle
 
@@ -15,89 +16,18 @@ from matplotlib import pyplot as plt
 
 import numpy as np
 
-def lazy_raw_process(params, dataloader):
-     #n_folds = 1
-    n_folds = 100
-    # filter bad neurons/sessions
-    min_neurons = 100
-    min_trials = 20
-
-    __train_data_folds = []
-    __test_data_folds = []   
-
-    for train_data_folds, test_data_folds in dataloader.generate_folds(n_folds):
-
-        _,ys,_,cs = train_data_folds
-        _,ys_t,_,cs_t = test_data_folds
-
-        valid = [i for i in range(len(ys)) if ys[i].shape[2] >= min_neurons and ys[i].shape[0] >= min_trials]
-        ys = [y[:,:,jnp.argsort(y.mean(0).std(0))[:100]] for y in ys]
-
-        ys = [ys[i].mean(0) for i in valid]
-        cs = [cs[i].mean(0) for i in valid]
-
-        ys_t = [ys_t[i].mean(0) for i in valid]
-        cs_t = [cs_t[i].mean(0) for i in valid]
-
-        S = len(ys)
-        __train_data_folds.append([ys,cs])
-        __test_data_folds.append([ys_t,cs_t])
-
-    # # save pickle
-    with open("100_folds_1_time_point.pkl","wb") as f:
-        pickle.dump([params,__train_data_folds,__test_data_folds],f)
-
-    _,ys,_,cs = dataloader.load_train_data()
-
-    #valid_cs = np.array([cs[i] for i in valid],dtype=object)
-
-    with open("raw_behavior.pkl","wb") as f:
-        pickle.dump(cs,f)
+# %%
 
 
-def preprocess_raw(params, dataloader):
-    
-    #n_folds = 1
-    n_folds = 100
-    # filter bad neurons/sessions
-    min_neurons = 100
-    min_trials = 20
+parser = argparse.ArgumentParser()
+parser.add_argument('--align_to', default='response')
+parser.add_argument('--mode', default='local')
+parser.add_argument('--bin_as_conds', default='False', choices=['True', 'False'])
 
-    train_data_folds, test_data_folds = dataloader.new_folds(n_folds)
-
-    __train_data_folds = []
-    __test_data_folds = []
-
-    for i in range(n_folds):
-        _,ys,_,cs = train_data_folds[i]
-        _,ys_t,_,cs_t = test_data_folds[i]
-
-        valid = [i for i in range(len(ys)) if ys[i].shape[2] >= min_neurons and ys[i].shape[0] >= min_trials]
-        ys = [y[:,:,jnp.argsort(y.mean(0).std(0))[:100]] for y in ys]
-
-        ys = [ys[i].mean(0) for i in valid]
-        cs = [cs[i].mean(0) for i in valid]
-
-        ys_t = [ys_t[i].mean(0) for i in valid]
-        cs_t = [cs_t[i].mean(0) for i in valid]
-
-        S = len(ys)
-        __train_data_folds.append([ys,cs])
-        __test_data_folds.append([ys_t,cs_t])
-
-    # # save pickle
-    with open("100_folds_1_time_point.pkl","wb") as f:
-        pickle.dump([params,__train_data_folds,__test_data_folds],f)
-
-    xs,ys,rs,cs = dataloader.load_train_data()
-
-    valid_cs = np.array([cs[i] for i in valid],dtype=object)
-
-    with open("raw_behavior.pkl","wb") as f:
-        pickle.dump(cs,f)
+args = parser.parse_args()
 
 params = {
-    'file': '../data_andrew/', #'../../../Data/',
+    'file': '../notebooks/data_andrew/', #'../../../Data/',
     'tag': '2022_Q2_IBL_et_al_RepeatedSite',
     'probe': 'probe00',
     'sessions': [0,5,6],
@@ -109,17 +39,18 @@ params = {
     'pre_time':0,
     'post_time':0.4,
     'n_bins': 10,
-    'align_to': 'response',
+    'align_to': args.align_to,
     'train_trial_prop':.9, 
     'train_condition_prop':1, 
     'seed':0,
     'verbose': True,
-    'bins_as_conds': True,
-    'mode':'local', ## Local or remote. Remote if testing
+    'bins_as_conds': args.mode == 'True',
+    'mode':args.mode, ## Local or remote. Remote if testing
     }
 
+
 dataloader = loader_modif.IBLDataLoader(
-         params,eids=setup.eids
+         params,eids=setup.all_eids
 )
 
-lazy_raw_process(params, dataloader)
+utils.lazy_raw_process(params, dataloader)

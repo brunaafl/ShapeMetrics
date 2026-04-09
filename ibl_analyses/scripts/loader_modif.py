@@ -59,9 +59,9 @@ class IBLSession:
         self.mode = params['mode']
 
         self.one = ONE(
-            base_url="https://openalyx.internationalbrainlab.org", 
-            password="international", 
-            silent=False, 
+            #base_url="https://alyx.internationalbrainlab.org", 
+            #password="international", 
+            #silent=False, 
             cache_dir=cache_dir,
             mode=self.mode
         )
@@ -334,10 +334,10 @@ class IBLDataLoader:
         cache_dir = cache_dir / params['tag']
         self.mode = params['mode'] # so i can check afterwards if local or remote
         one = ONE(
-            base_url="https://openalyx.internationalbrainlab.org", 
-            username='intbrainlab',
-            password="international", 
-            silent=False, 
+            #base_url="https://alyx.internationalbrainlab.org", 
+            #username='intbrainlab',
+            #password="international", 
+            #silent=False, 
             cache_dir=cache_dir,
             mode=self.mode
         )
@@ -348,13 +348,13 @@ class IBLDataLoader:
             # It is important for me to be able to load form remote 
             one.load_cache()
 
-        bwm_sessions = one.alyx.rest(
-            'sessions', 'list', dataset_types='spikes.times', tag=params['tag']
-        )
+            bwm_sessions = one.alyx.rest(
+                'sessions', 'list', dataset_types='spikes.times', tag=params['tag']
+            )
 
-        df = pd.DataFrame(bwm_sessions)
-        if eids is None:
-            eids = list(df['id']) if params['sessions'] is None else [list(df['id'])[s] for s in params['sessions']]
+            df = pd.DataFrame(bwm_sessions)
+            if eids is None:
+                eids = list(df['id']) if params['sessions'] is None else [list(df['id'])[s] for s in params['sessions']]
 
         # Filter 
 
