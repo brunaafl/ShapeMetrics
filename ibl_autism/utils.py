@@ -14,9 +14,8 @@ from pathlib import Path
 DATA_DIR = Path('/home/blopes/ShapeMetrics/ibl_autism/data/')
 BEHAVIOR_DIR = Path('/home/blopes/ShapeMetrics/ibl_autism/data_behavior/')
 
-def load_animal_region_kernels(genotype, id, region, r2_cutoff=0.01, return_metadata=False):
-
-    list_units = glob.glob(os.path.join(DATA_DIR, genotype, region, f'gam_fit_useCoupling0_*_{region}_{id}_*.mat'))
+def load_animal_region_kernels(genotype, animal_id, region, r2_cutoff=0.01):
+    list_units = glob.glob(os.path.join(DATA_DIR, genotype, region, f'gam_fit_useCoupling0_*_{region}_{animal_id}_*.mat'))
 
     all_kernels = []
     
@@ -79,11 +78,11 @@ def load_region_kernels(genotype, region, r2_cutoff=0.01):
     return result_kernels
 
 
-def load_animal_kernels(genotype, regions, id, r2_cutoff=0.01):
+def load_animal_kernels(genotype, regions, animal_id, r2_cutoff=0.01):
     all_kernels = []
     
     for region in regions:
-        result = load_animal_region_kernels(genotype, id, region, r2_cutoff=r2_cutoff)
+        result = load_animal_region_kernels(genotype, animal_id, region, r2_cutoff=r2_cutoff)
     
         region_kernels = result
         if len(region_kernels) > 0:
@@ -175,3 +174,18 @@ def filter_kernels_outliers(kernels, percentile_upper=95, percentile_lower=5):
     mask = (kernel_max <= upper_threshold) & (kernel_min >= lower_threshold)
     
     return kernels[mask]
+
+
+def detect_outlier_subjects(kernel_list, mad_factor=3.0):
+    # Detect outlier subjects based on the amplitude of their mean kernel
+    
+    # Mean kernel per subject
+    amplitudes = np.array([np.abs(k.mean(axis=0)).max() for k in kernel_list])
+
+    med = np.nanmedian(amplitudes)
+    std = np.nanstd(amplitudes)
+
+    amplitude_threshold = med + mad_factor * std
+    
+    keep_mask = amplitudes <= amplitude_threshold
+    return keep_mask, amplitudes
