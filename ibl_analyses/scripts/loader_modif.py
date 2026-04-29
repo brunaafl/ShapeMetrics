@@ -6,6 +6,7 @@
 
 import gc
 import os
+import time
 import numpy as np
 
 from iblatlas.regions import BrainRegions
@@ -18,6 +19,7 @@ from pathlib import Path
 import pandas as pd
 from typing import Dict
 import warnings
+import psutil
 import ray
 import tqdm
 #import ibl_analyses.scripts.utils as utils
@@ -32,7 +34,7 @@ warnings.filterwarnings(
     category=DeprecationWarning
 )
 
-#os.environ['REVISION_LAST_BEFORE'] = '2022-09-16'
+#os.environ['REVISION_LAST_BEFORE'] = '2024-05-06'
 # %%
 class IBLSession:
     def __init__(self,params):
@@ -66,8 +68,8 @@ class IBLSession:
         
         self.brain_atlas = AllenAtlas()
 
-        self.load_session()
-        self.load_session_data()
+        #self.load_session()
+        #self.load_session_data()
 
     def check_rep(self,spikes,clusters):
          # spikes.clusters provides ids which match clusters['cluster_id']
@@ -81,6 +83,10 @@ class IBLSession:
     
     def load_session(self):
         if self.params["verbose"]: print("loading session: ", self.eid)
+
+        # save data origin
+        details = self.one.get_details(self.eid)
+        self.lab = details['lab']
         
         trials = self.one.load_object(self.eid,'trials',collection='alf')
         try:
@@ -90,8 +96,16 @@ class IBLSession:
                 one=self.one, 
                 atlas=self.brain_atlas
             )
-            #print("Loading spike sorting for session ", self.eid)
+            
+            print("Loading spike sorting for session ", self.eid)
 
+            # Debug: List all datasets and their revisions before loading
+            """all_datasets = self.one.list_datasets(self.eid)
+            print(f"\nDataset revisions in cache:")
+            for ds in all_datasets:
+                if 'spikes' in ds or 'clusters' in ds or 'channels' in ds:
+                    print(f"  {ds}")
+        """
             spikes, clusters, channels = sl.load_spike_sorting()  # enforce_version=True was breaking it... , good_units=True alo breaks it 
             
             # TODO: maybe try to recompute cluster metrics in one specific data and see if impacts on smth
@@ -132,11 +146,15 @@ class IBLSession:
         )
         
         # If you pass explicitly the areas, select them
+        acronym_allen = self.data[self.params['probe']]['clusters']['acronym']
+        acronym_beryl = BrainRegions().acronym2acronym(acronym_allen, 'Beryl')
+        
         if self.params['areas'] is not None:
-            acronym_allen = self.data[self.params['probe']]['clusters']['acronym']
-            acronym_beryl = BrainRegions().acronym2acronym(acronym_allen, 'Beryl')
             acronym_bool = np.isin(acronym_beryl, self.params['areas'])
             y = y[:,acronym_bool,:]
+            regions = acronym_beryl[acronym_bool]
+        else:
+            regions = acronym_beryl
 
         reaction_times = trials['response_times'] - trials['stimOn_times']
         correct = trials['feedbackType']
@@ -207,48 +225,20 @@ class IBLSession:
         
         if self.params['n_neurons'] is not None:
             y = y[:,:,:self.params['n_neurons']]
-
-        if self.params['bins_as_conds']:
-
-            self.data = split_data_cv({
-                    'y':y,
-                    'reaction_times':reaction_times[:self.params['n_trials'],:],
-                    'correct':correct[:self.params['n_trials'],:],
-                },
-                self.params['props'],
-                self.params['seeds']
-            )
-        else:
-            
-            keys = ['y_train', 'y_test', 'y_validation', 'reaction_times_train', 
-                    'reaction_times_test', 'reaction_times_validation', 'correct_train', 
-                    'correct_test', 'correct_validation'] # nasty, improve this
-            
-            self.data = {key: [] for key in keys}
-            for ti in range(len(t)):
-                cv_data = split_data_cv({
-                        'y':y[:,:,ti],
-                        'reaction_times':reaction_times[:self.params['n_trials'],:],
-                        'correct':correct[:self.params['n_trials'],:],
-                    },
-                    self.params['props'],
-                    self.params['seeds']
-                )
-                for k in keys:
-                    self.data[k].append(cv_data[k])
             
         self.y = y
         self.x = x
         self.reaction_times = reaction_times
         self.correct = correct
-        self.regions = acronym_beryl[acronym_bool]
+        self.regions = regions
 
         gc.collect()
 
-        ## ADDED NOW TO SAVE REGIONS INFORMATION -- DOUBLE CHECK
-        #self.regions = acronym_beryl[acronym_bool]
-        
-    def new_fold(self,seeds=None):
+    def new_fold(self, seeds=None):
+        """
+        Generate a new fold if cross-validation
+        """
+
         # TODO: Might be better to enforce the user to determine the seed
         if seeds is None:
             seeds = {
@@ -257,7 +247,6 @@ class IBLSession:
                 'validation': np.random.randint(0,10000)
             }
         if self.params['bins_as_conds']:
-
             self.data = split_data_cv({
                     'y':self.y,
                     'reaction_times':self.reaction_times[:self.params['n_trials'],:],
@@ -268,12 +257,13 @@ class IBLSession:
             )
         else:
             
-            keys = ['y_train', 'y_test', 'y_validation', 'reaction_times_train', 
-                    'reaction_times_test', 'reaction_times_validation', 'correct_train', 
-                    'correct_test', 'correct_validation'] # nasty, improve this
+            keys = ['y_train', 'y_test', 'y_validation', 
+                    'reaction_times_train', 'reaction_times_test', 'reaction_times_validation', 
+                    'correct_train', 'correct_test', 'correct_validation'] # nasty, improve this
             
             self.data = {key: [] for key in keys}
             for ti in range(self.y.shape[2]):
+                # For each time bin, split on 2 folds and concatenate after
                 cv_data = split_data_cv({
                         'y':self.y[:,:,ti],
                         'reaction_times':self.reaction_times[:self.params['n_trials'],:],
@@ -285,6 +275,11 @@ class IBLSession:
                 for k in keys:
                     self.data[k].append(cv_data[k])
 
+    ## Aded in case of no cross-validation
+    def load_data(self):
+        return self.x, self.data['y'], self.data['reaction_times'], self.data['correct'], self.regions
+
+    # Helper method for cross-validation
     def load_train_data(self):
         return self.x, self.data['y_train'], self.data['reaction_times_train'], self.data['correct_train'], self.regions
 
@@ -335,27 +330,30 @@ class IBLDataLoader:
             # It is important for me to be able to load form remote 
             one.load_cache()
 
-        bwm_sessions = one.alyx.rest(
-            'sessions', 'list', dataset_types='spikes.times', tag=params['tag']
-        )
+            bwm_sessions = one.alyx.rest(
+                'sessions', 'list', dataset_types='spikes.times', tag=params['tag']
+            )
 
-        df = pd.DataFrame(bwm_sessions)
-        if eids is None:
-            eids = list(df['id']) if params['sessions'] is None else [list(df['id'])[s] for s in params['sessions']]
+            df = pd.DataFrame(bwm_sessions)
+            if eids is None:
+                eids = list(df['id']) if params['sessions'] is None else [list(df['id'])[s] for s in params['sessions']]
 
         # Filter 
 
         self.eids = eids
         self.probe = params['probe']
         self.areas = params['areas']
+        self.labs = [] # save lab info
 
         self.parallel = parallel
 
         if parallel:
             ray.init(
                 ignore_reinit_error=True,
-                runtime_env={'working_dir': '../'}
+                runtime_env={'working_dir': '../'},
+                num_cpus=max(1, os.cpu_count() - 1)
             )
+
             self.sessions = [
                 IBLSessionRemote.remote(
                     {**params,**{'eid':eid}}
@@ -382,12 +380,10 @@ class IBLDataLoader:
 
                 sess.load_session()
 
-                #print(sess.data.keys())
-                #print(sess.data.keys())
-
                 if bool(sess.data[params['probe']]): 
                     self.sessions.append(sess)
                     self.eids.append(eid)
+                    self.labs.append(sess.lab)
                     sess.load_session_data()
                 else:
                     print(f"Skipping empty session {eid}")
@@ -399,6 +395,8 @@ class IBLDataLoader:
         #self.eids = [s.eid for s in self.sessions]
         print(f"Successfully loaded {len(self.sessions)} sessions.")
     
+    def load_data(self):
+        return zip(*[sess.load_data() for sess in self.sessions])
 
     def load_train_data(self):
         if self.parallel: 
@@ -432,20 +430,23 @@ class IBLDataLoader:
     def new_folds(self,n_folds=10,seeds=None):
         all_train_data=[]
         all_test_data=[]
-        for _ in range(n_folds):
+        for i in range(n_folds):
             [sess.new_fold(seeds) for sess in self.sessions]
             all_train_data.append(self.load_train_data())
             all_test_data.append(self.load_test_data())
 
         return all_train_data, all_test_data
+
     
     def generate_folds(self, n_folds=10, seeds=None):
             # Memory-efficient generator..
 
             for i in range(n_folds):
+                #_log_mem('Track memory usage generating folds')
+                t0 = time.time()
                 [sess.new_fold(seeds) for sess in self.sessions]
-                
-                # The script will process this and discard it before the next loop
+                t1 = time.time()
+                #print('Time taken :', t1-t0)
                 yield self.load_train_data(), self.load_test_data()
     
     def new_folds_avg(self,n_folds=10,seeds=None):
@@ -480,12 +481,16 @@ def split_data_cv(data,props,seeds):
 
     test_trials = trial_indices[-int(props['test']*N):]
 
+    #print("Test indices: ", test_trials)
+
     train_trials = jax.random.choice(
         jax.random.PRNGKey(seeds['validation']),
         shape=(int(N*props['train']),),
         a=trial_indices[:-int(props['test']*N)],
         replace=False
     ).sort()
+
+    #print("Train indices: ", train_trials)
 
     validation_trials = np.setdiff1d(trial_indices[:-int(props['test']*N)],train_trials).tolist()
 
