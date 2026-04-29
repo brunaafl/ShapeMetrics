@@ -59,9 +59,9 @@ class IBLSession:
         self.mode = params['mode']
 
         self.one = ONE(
-            #base_url="https://alyx.internationalbrainlab.org", 
-            #password="international", 
-            #silent=False, 
+            base_url="https://openalyx.internationalbrainlab.org", 
+            password="international", 
+            silent=False, 
             cache_dir=cache_dir,
             mode=self.mode
         )
@@ -99,6 +99,13 @@ class IBLSession:
             
             print("Loading spike sorting for session ", self.eid)
 
+            # Debug: List all datasets and their revisions before loading
+            """all_datasets = self.one.list_datasets(self.eid)
+            print(f"\nDataset revisions in cache:")
+            for ds in all_datasets:
+                if 'spikes' in ds or 'clusters' in ds or 'channels' in ds:
+                    print(f"  {ds}")
+        """
             spikes, clusters, channels = sl.load_spike_sorting()  # enforce_version=True was breaking it... , good_units=True alo breaks it 
             
             # TODO: maybe try to recompute cluster metrics in one specific data and see if impacts on smth
@@ -334,10 +341,10 @@ class IBLDataLoader:
         cache_dir = cache_dir / params['tag']
         self.mode = params['mode'] # so i can check afterwards if local or remote
         one = ONE(
-            #base_url="https://alyx.internationalbrainlab.org", 
-            #username='intbrainlab',
-            #password="international", 
-            #silent=False, 
+            base_url="https://openalyx.internationalbrainlab.org", 
+            username='intbrainlab',
+            password="international", 
+            silent=False, 
             cache_dir=cache_dir,
             mode=self.mode
         )
@@ -460,11 +467,11 @@ class IBLDataLoader:
             # Memory-efficient generator..
 
             for i in range(n_folds):
-                _log_mem('Track memory usage generating folds')
+                #_log_mem('Track memory usage generating folds')
                 t0 = time.time()
                 [sess.new_fold(seeds) for sess in self.sessions]
                 t1 = time.time()
-                print('Time taken :', t1-t0)
+                #print('Time taken :', t1-t0)
                 yield self.load_train_data(), self.load_test_data()
     
     def new_folds_avg(self,n_folds=10,seeds=None):
