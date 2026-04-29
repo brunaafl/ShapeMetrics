@@ -202,7 +202,9 @@ class IBLSession:
             print(y.shape)   
 
         else:
-
+            n_trials = np.array([sum(contrast == c) for c in contrasts])
+            padding = max(n_trials) - n_trials
+            
             y = np.array([
                     [y[j]
                     for j in np.where(indices==i)[0][:n_trials].tolist()] 
