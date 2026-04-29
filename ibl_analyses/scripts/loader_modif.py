@@ -172,7 +172,7 @@ class IBLSession:
 
         # Select contrast of the used trials
         #contrast = contrast[trial_indices]
-        contrast = contrast[trial_indices].flatten()
+        contrast = contrast[trial_indices]
 
         contrasts, indices, counts = np.unique(
             contrast,axis=0,
@@ -180,7 +180,7 @@ class IBLSession:
             return_counts=True
         )
 
-        #n_trials = min(counts) # get, for each condition, the min number of trials
+        n_trials = min(counts) # get, for each condition, the min number of trials
 
         n_conditions = contrasts.shape[0]
         n_time_bins = len(t)
@@ -188,36 +188,49 @@ class IBLSession:
 
         # Optimizing the array construction
         if self.params['bins_as_conds']:
+
+            # Optimized, but trying Andrew's version
+            y_aux = np.zeros((n_conditions*n_time_bins, n_trials, n_neurons))
+
+            for cond in range(n_conditions):
+                # For each cond
+                mask_cond = np.where(indices == cond)[0][:n_trials]
+
+                # Sliding window over time bins and cond
+                for t_idx in range(n_time_bins):
+                    row_idx = cond * n_time_bins + t_idx
+
+                    y_aux[row_idx, :, :] = y[mask_cond, :, t_idx]
             
-            # Andrew's code
-            n_trials = np.array([sum(contrast == c) for c in contrasts])
-            padding = max(n_trials) - n_trials
-
-            y = np.dstack(np.array(
-                [np.array([
-                    np.vstack((yx, np.full((padding[c],self.params['n_bins']), np.nan))) 
-                    for yx in y[contrast==contrasts[c],:,:].transpose(1,0,2)])
-                    for c in range(len(contrasts))])).transpose(1, 2, 0)     
-
-            print(y.shape)   
+            y = y_aux.transpose(1,0,2) ## This will be (n_trials, time_bins*conditions, n_neurons)
+            
 
         else:
 
-            y = np.array([
-                    [y[j]
-                    for j in np.where(indices==i)[0][:n_trials].tolist()] 
-                    for i in range(contrasts.shape[0])]
-                ).transpose(1,0,3,2)
-                
-        reaction_times = list_to_array([
-            [reaction_times[j]
-            for j in np.where(indices==i)[0].tolist()] 
-            for i in range(contrasts.shape[0])]).T
-        correct = list_to_array([
-            [correct[j]
-            for j in np.where(indices==i)[0].tolist()] 
-            for i in range(contrasts.shape[0])]).T
+            y_aux = np.zeros((n_conditions, n_trials, n_neurons, n_time_bins))
+            
+            for i in range(n_conditions):
+                cond_indices = np.where(indices == i)[0][:n_trials]
+                # Fill trials and neurons, keep time bins last for now
+                y_aux[i, :, :, :] = y[cond_indices, :, :]
 
+            y = y_aux.transpose(1, 0, 3, 2) # (n_trials, n_cond, time_bins, n_neurons)
+        
+        print(y.shape)
+
+        # This works for a constant number of trials 
+        reaction_times = np.array([
+            [reaction_times[j]
+            for j in np.where(indices==i)[0][:n_trials].tolist()] 
+            for i in range(contrasts.shape[0])]
+        ).T
+        correct = np.array([
+            [correct[j]
+            for j in np.where(indices==i)[0][:n_trials].tolist()] 
+            for i in range(contrasts.shape[0])]
+        ).T
+        
+        
         x = np.array([[x_,t_] for x_ in contrasts.squeeze() for t_ in t])
 
         if self.params['n_trials'] is not None:
@@ -231,6 +244,18 @@ class IBLSession:
         self.reaction_times = reaction_times
         self.correct = correct
         self.regions = regions
+
+        ## After this process, data is still stored but not used ##
+        # Deleat it to optimize RAM usage
+        #print( 'Deleting useless data...')
+
+        self.data = {
+            'y': y,
+            'reaction_times': reaction_times,
+            'correct': correct,
+            'regions': self.regions,
+            'x': x
+        }
 
         gc.collect()
 
@@ -502,15 +527,30 @@ def split_data_cv(data,props,seeds):
     
     return out
 
-def list_to_array(list):
-    # From Andrew's code
-    # He gets the maximum number of trials and completes the minimum with nans
+# %%
+# Find the Experiment/Session IDs (eids) corresponding to the tag of interest
+# Notice that this is different from the pids (the probe ids) which are the inserted probes
+# The probes you find doing one.searh_insertion(tag= ...) -> my first mistake 
 
-    max_len = max(len(row) for row in list)
+def find_eids(one, tag):
+    bwm_sessions = one.alyx.rest(
+        'sessions', 'list', dataset_types='spikes.times', tag=tag
+    )
 
-    for i in range(len(list)):
-        list[i] = list[i] + (max_len - len(list[i])) * [np.nan]
-                             
-    return np.array(list)
+    df = pd.DataFrame(bwm_sessions)
+    eids = list(df['id'])
+    return eids
 
+# %%
+# Here to investigate the memory usage 
+
+def _human(n):
+    for u in ['B','KB','MB','GB']:
+        if n < 1024.0: return f"{n:3.1f}{u}"
+        n /= 1024.0
+    return f"{n:.1f}TB"
+
+def _log_mem(tag=""):
+    p = psutil.Process(os.getpid())
+    print(f"[MEM] {tag} rss={_human(p.memory_info().rss)} vms={_human(p.memory_info().vms)}")
 
