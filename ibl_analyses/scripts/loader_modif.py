@@ -99,13 +99,6 @@ class IBLSession:
             
             print("Loading spike sorting for session ", self.eid)
 
-            # Debug: List all datasets and their revisions before loading
-            """all_datasets = self.one.list_datasets(self.eid)
-            print(f"\nDataset revisions in cache:")
-            for ds in all_datasets:
-                if 'spikes' in ds or 'clusters' in ds or 'channels' in ds:
-                    print(f"  {ds}")
-        """
             spikes, clusters, channels = sl.load_spike_sorting()  # enforce_version=True was breaking it... , good_units=True alo breaks it 
             
             # TODO: maybe try to recompute cluster metrics in one specific data and see if impacts on smth
@@ -163,6 +156,8 @@ class IBLSession:
         reaction_times = reaction_times[trial_indices]
         correct = correct[trial_indices]
         y = y[trial_indices]
+
+        #print(y.shape) (sum(trials[c]) for c in contrast, n_neurons, n_time_bins)
         
         # Find which trials correspond to which contrast
         # Also returns list of unique contrasts and number of trials for each contrast
@@ -189,8 +184,9 @@ class IBLSession:
         # Optimizing the array construction
         if self.params['bins_as_conds']:
             
-            # Andrew's code
+            # Instead of getting min_trials, get max_trials and pad the rest with nans to not discard trials 
             n_trials = np.array([sum(contrast == c) for c in contrasts])
+            # Get max number of trials for each condition
             padding = max(n_trials) - n_trials
 
             y = np.dstack(np.array(
@@ -199,17 +195,22 @@ class IBLSession:
                     for yx in y[contrast==contrasts[c],:,:].transpose(1,0,2)])
                     for c in range(len(contrasts))])).transpose(1, 2, 0)     
 
-            print(y.shape)   
+            print(y.shape) # (n_trials, n_conditons*n_time_bins, n_neurons)  
 
         else:
             n_trials = np.array([sum(contrast == c) for c in contrasts])
             padding = max(n_trials) - n_trials
-            
+
             y = np.array([
-                    [y[j]
-                    for j in np.where(indices==i)[0][:n_trials].tolist()] 
-                    for i in range(contrasts.shape[0])]
-                ).transpose(1,0,3,2)
+                np.vstack((
+                    y[np.where(indices==i)[0], :, :],
+                    np.full((padding[i], y.shape[1], y.shape[2]), np.nan) # complete with nans to max trials 
+                ))
+                for i in range(contrasts.shape[0])
+            ]).transpose(1, 0, 3, 2)
+            
+            print(y.shape)    # (n_trials, n_conditions, n_time_bins, n_neurons)
+
                 
         reaction_times = list_to_array([
             [reaction_times[j]

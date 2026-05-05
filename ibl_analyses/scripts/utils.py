@@ -3,17 +3,28 @@
 """
 @author: Amin
 """
+import logging
+
+import logging
+
 import ray
 import pickle
+import tqdm
+import gzip
 
 import numpy as np
 import jax.numpy as jnp
+import scipy.stats as sts
+import seaborn as sns
 
 from netrep.metrics import LinearMetric
 from netrep.metrics import GaussianStochasticMetric
 
 from scipy.stats import rankdata
 from sklearn.metrics import pairwise_distances
+from matplotlib import pyplot as plt
+
+logger = logging.getLogger(__name__)
 
 # %%
 @ray.remote
@@ -134,7 +145,7 @@ def lazy_raw_process(params, dataloader, regions='all', n_folds = 50):
         if regions=='all':
             valid = [i for i in range(len(ys)) if ys[i].shape[2] >= min_neurons and ys[i].shape[0] >= min_trials]
             
-            ys = [y[:,:,jnp.argsort(y.mean(0).std(0))[:min_neurons]] for y in ys]
+            #ys = [y[:,:,jnp.argsort(y.mean(0).std(0))[:min_neurons]] for y in ys]
 
             if len(n_trials) == 0:
                 n_trials = [ys[i].shape[0] for i in valid]
@@ -174,3 +185,177 @@ def lazy_raw_process(params, dataloader, regions='all', n_folds = 50):
         pickle.dump([n_trials,valid_cs],f)
 
     return valid
+
+# %%
+
+def process_and_correlate_fold(fold, w=10, s=1, r='all'):
+
+    all_corrs = [] # to save the correlations for each time bin
+
+    ys_time, cs_time, regions = fold['ys'], fold['cs_t'], fold['r']
+
+    S = len(ys_time)
+    mask = np.triu_indices(S,1)
+
+    # Behavioral distance doesnt change across windows
+
+    corr_matrix = np.corrcoef(cs_time)
+    dist_cc = 1 - corr_matrix
+    dist_cc = dist_cc[mask]
+
+    # I think this can be optimized with matrix multiplications for gpu parallelization
+    # Adding some stride to speed up
+    for t in tqdm.tqdm(range(0, len(ys_time[0])-w, s)):  # Stride of s
+
+        # get best min_neurons and current time point + window
+        all_sessions = []
+        for session in range(S):
+
+            ys_session = ys_time[session][t:t+w,:] # (time window, cond, neurons)
+
+            # Slide window and reshape to (time*cond, neurons)
+            ys_sess = ys_session.reshape(-1,ys_session.shape[-1])
+
+            all_sessions.append(ys_sess)
+
+        try:
+            # this will make the process waaay faster
+            dist_neural_list = dsd([
+                [all_sessions[i],all_sessions[j]]
+                for i in range(S) 
+                for j in range(i+1,S)], batch_size=100
+            )
+
+            # symmetrize the distance matrix
+            dist_neural = np.zeros((S,S))
+            dist_neural[np.triu_indices(S,1)] = dist_neural_list
+
+            corr = sts.pearsonr(dist_neural[mask], dist_cc)[0]
+
+        except (np.linalg.LinAlgError, ValueError):
+            logger.warning(f"{t} linear algebra error/nan")
+            # Can occour when the optimization problem does not converge?
+            all_corrs.append(np.nan)
+            continue
+        
+        all_corrs.append(corr)
+
+    return all_corrs
+
+
+import time
+
+def process_fold(gzipped_fold, w=10, s=1):
+
+    t_start = time.time()
+    with gzip.open(f"./notebooks/{gzipped_fold}", 'rb') as f:
+        fold = pickle.load(f)
+    t_decomp = time.time()
+    
+    result = process_and_correlate_fold(fold, w=w, s=s)
+    t_end = time.time()
+    
+    logger.debug(f"Fold {gzipped_fold}: decomp={t_decomp-t_start:.2f}s, process={t_end-t_decomp:.2f}s")
+    return result
+
+#@ray.remote
+def load_and_process_fold(region, align_to, w=10, s=1):
+    t_total_start = time.time()
+    
+    fold_path = f"./notebooks/prep_data/{region}/folds_index_{align_to}.pkl"
+    with open(f"{fold_path}", "rb") as f:
+        folds = pickle.load(f)
+
+    logger.info(f"Loaded {len(folds['files'])} folds for region {region} and alignment {align_to}.")
+    
+    all_corrs_list = []
+    for gzipped_fold in tqdm.tqdm(folds['files']):
+        result = process_fold(gzipped_fold, w, s)
+        all_corrs_list.extend(result)
+    
+    t_total_end = time.time()
+    logger.info(f"Region {region} ({align_to}): completed in {t_total_end-t_total_start:.2f}s")
+    return all_corrs_list
+
+
+def plot_time_corrs(all_corrs, ax=None, w=10, save_path=None):
+
+    if ax is None:
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(7,5))
+
+    x_time = np.linspace(-1,1,len(all_corrs[0]))
+    x_time += np.diff(x_time)[0]*w
+
+    sig = {}
+
+    for align_to, all_corrs_align in all_corrs.items():
+
+        sig_align = (1-np.nanmean(all_corrs_align>0,0))*2 <0.05
+        sig[align_to] = sig_align
+
+        ax.plot(x_time,np.nanmean(all_corrs_align,0),color="darkblue" if align_to=='response' else 'darkred')
+        ax.fill_between(x_time,[np.nanpercentile(a,2.5) for a in all_corrs_align.T],[np.nanpercentile(a,97.5) for a in all_corrs_align.T],
+                        color='darkblue' if align_to=='response' else 'darkred',alpha=0.2,label=f'{align_to} aligned (95% CI.).')
+
+    ax.plot(x_time[sig['stim']],np.ones_like(x_time[sig['stim']])*0.29,'|',color='darkred')
+    ax.plot(x_time[sig['response']],np.ones_like(x_time[sig['response']])*0.275,'|',color='darkblue')
+    sig_stim_resp = (1-np.nanmean(sig['stim']<np.nanmean(sig['response'],0),0))*2 <0.05
+
+    ax.plot(x_time[sig_stim_resp],np.ones_like(x_time[sig_stim_resp])*0.26,'|',color='k')
+
+    ax.plot(x_time,np.zeros_like(x_time),'--',color='k',alpha=0.5)
+    ax.set_xlabel('time from alignment (s)')
+    ax.set_ylabel('pearson correlation')
+    ax.set_title('neural and behavioral distance\ncorrelation time course')
+    ax.legend()
+    ax.set_xlim(-0.5,1)
+    ax.set_ylim(-0.1,0.3)
+    ax.set_yticks([-0.1,0,0.1,0.2,0.3],['',0,'','','.3'])
+    ax.set_xticks([-0.5,-0.25,0,0.25,0.5,0.75,1],['-.5','','0','','.5','','1'])
+    ax.legend(frameon=False)
+    # change font color of legend
+    leg = ax.get_legend()
+    ltext  = leg.get_texts()
+
+    plt.setp(ltext[1], color='darkred')
+    plt.setp(ltext[0], color='darkblue')
+    sns.despine()
+    #fig.tight_layout()
+
+    if save_path is not None:
+        plt.savefig(save_path, dpi=300)
+
+def plot_all_regions(all_corrs, w=10, save_path=None):
+    colors = {'VISa':'#03A6A6', 'CA1':'#88D94E', 'DG':'#88D94E', 'LP':'#F28D9F', 'PO':'#F28D9F'}
+
+    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(10, 6))
+    
+    for region, all_corrs_region in all_corrs.items():
+        x_time = np.linspace(-1, 1, len(all_corrs_region[0]))
+        x_time += np.diff(x_time)[0] * w
+        
+        color = colors.get(region, '#000000')  # Default to black if region not in colors dict
+        
+        ax.plot(x_time, np.nanmean(all_corrs_region, 0), color=color, linewidth=2, label=region)
+        ax.fill_between(x_time, 
+                       [np.nanpercentile(a, 2.5) for a in all_corrs_region.T], 
+                       [np.nanpercentile(a, 97.5) for a in all_corrs_region.T],
+                       color=color, alpha=0.2)
+    
+    ax.plot(x_time, np.zeros_like(x_time), '--', color='k', alpha=0.5)
+    ax.set_xlabel('time from alignment (s)')
+    ax.set_ylabel('pearson correlation')
+    ax.set_title('neural and behavioral distance\ncorrelation time course by region')
+    ax.set_xlim(-0.5, 1)
+    ax.set_ylim(-0.1, 0.3)
+    ax.set_yticks([-0.1, 0, 0.1, 0.2, 0.3], ['', 0, '', '', '.3'])
+    ax.set_xticks([-0.5, -0.25, 0, 0.25, 0.5, 0.75, 1], ['-.5', '', '0', '', '.5', '', '1'])
+    ax.legend(frameon=False, loc='upper left')
+    sns.despine()
+    
+    if save_path is not None:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+
+    plt.show()
+    
+    return fig, ax
