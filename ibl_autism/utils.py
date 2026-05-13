@@ -170,7 +170,7 @@ def filter_kernels_outliers(kernels, percentile_upper=95, percentile_lower=5):
     upper_threshold = np.percentile(kernel_max, percentile_upper)
     lower_threshold = np.percentile(kernel_min, percentile_lower)
     
-    # Create boolean mask
+    # Create filtering mask
     mask = (kernel_max <= upper_threshold) & (kernel_min >= lower_threshold)
     
     return kernels[mask]
