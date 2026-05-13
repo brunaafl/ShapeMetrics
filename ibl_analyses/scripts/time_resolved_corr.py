@@ -11,13 +11,8 @@ logger = logging.getLogger(__name__)
 
 from utils import plot_time_corrs, load_and_process_fold
 def main(args):
-    # Initialize Ray once in the main threadxs
-    """if not ray.is_initialized():
-        ray.init(ignore_reinit_error=True)
-        logger.info("Ray initialized")
-        # Remove ray as i am already on 100% cpu 
-    """
-    w, s = 12, 2
+
+    w, s = 15, 2
 
     if len(args.region) == 1:
         region = args.region[0]
@@ -29,9 +24,9 @@ def main(args):
         
         logger.info("Finished loading. Plotting results.")
 
-        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(7,5))
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6,5))
         all_corrs = {'response': all_corrs_resp, 'stim': all_corrs_stim}
-        plot_time_corrs(all_corrs, ax=ax, w=w, save_path=f'../notebooks/results/time_corrs_{region}.svg')
+        plot_time_corrs(all_corrs, ax=ax, w=w, s=s, save_path=f'time_corrs_{region}.svg')
         logger.info("Finished plotting results.")
 
     else:

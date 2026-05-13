@@ -11,6 +11,7 @@ import ray
 import pickle
 import tqdm
 import gzip
+import multiprocessing
 
 import numpy as np
 import jax.numpy as jnp
@@ -25,6 +26,7 @@ from sklearn.metrics import pairwise_distances
 from matplotlib import pyplot as plt
 
 logger = logging.getLogger(__name__)
+N_CPUS = multiprocessing.cpu_count()
 
 # %%
 @ray.remote
@@ -203,27 +205,22 @@ def process_and_correlate_fold(fold, w=10, s=1, r='all'):
     dist_cc = 1 - corr_matrix
     dist_cc = dist_cc[mask]
 
+    # Convert ys_time to jax arrays for a bit faster processing in dsd
+    ys_time_jax = [jnp.array(ys_time[session]) for session in range(S)]
+
     # I think this can be optimized with matrix multiplications for gpu parallelization
     # Adding some stride to speed up
     for t in tqdm.tqdm(range(0, len(ys_time[0])-w, s)):  # Stride of s
 
         # get best min_neurons and current time point + window
-        all_sessions = []
-        for session in range(S):
-
-            ys_session = ys_time[session][t:t+w,:] # (time window, cond, neurons)
-
-            # Slide window and reshape to (time*cond, neurons)
-            ys_sess = ys_session.reshape(-1,ys_session.shape[-1])
-
-            all_sessions.append(ys_sess)
+        all_sessions = [ys_time_jax[session][t:t+w,:].reshape(-1, ys_time_jax[session].shape[-1]) for session in range(S)]
 
         try:
             # this will make the process waaay faster
             dist_neural_list = dsd([
                 [all_sessions[i],all_sessions[j]]
                 for i in range(S) 
-                for j in range(i+1,S)], batch_size=100
+                for j in range(i+1,S)]
             )
 
             # symmetrize the distance matrix
@@ -271,20 +268,26 @@ def load_and_process_fold(region, align_to, w=10, s=1):
     all_corrs_list = []
     for gzipped_fold in tqdm.tqdm(folds['files']):
         result = process_fold(gzipped_fold, w, s)
-        all_corrs_list.extend(result)
+        all_corrs_list.append(result)
     
     t_total_end = time.time()
     logger.info(f"Region {region} ({align_to}): completed in {t_total_end-t_total_start:.2f}s")
-    return all_corrs_list
+    return np.array(all_corrs_list)
 
 
-def plot_time_corrs(all_corrs, ax=None, w=10, save_path=None):
+def plot_time_corrs(all_corrs, ax=None, w=10, s=1, save_path=None):
 
     if ax is None:
-        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(7,5))
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6,5))
 
-    x_time = np.linspace(-1,1,len(all_corrs[0]))
-    x_time += np.diff(x_time)[0]*w
+    """x_time = np.linspace(-1,1,len(all_corrs[list(all_corrs.keys())[0]][0]))
+    x_time += np.diff(x_time)[0]*w"""
+
+    # I think what i was doing is wrong, now im centering the time bins in the middle of the window and accounting for stride
+    idx = np.array(list(range(0,150-w,s)))
+    x_time = np.linspace(-1,1,150)
+    diff = np.diff(x_time)[0]*w/2
+    x_time = x_time[idx]+diff
 
     sig = {}
 
@@ -299,8 +302,7 @@ def plot_time_corrs(all_corrs, ax=None, w=10, save_path=None):
 
     ax.plot(x_time[sig['stim']],np.ones_like(x_time[sig['stim']])*0.29,'|',color='darkred')
     ax.plot(x_time[sig['response']],np.ones_like(x_time[sig['response']])*0.275,'|',color='darkblue')
-    sig_stim_resp = (1-np.nanmean(sig['stim']<np.nanmean(sig['response'],0),0))*2 <0.05
-
+    sig_stim_resp = (1-np.nanmean(all_corrs['stim']<np.nanmean(all_corrs['response'],0),0))*2 <0.05
     ax.plot(x_time[sig_stim_resp],np.ones_like(x_time[sig_stim_resp])*0.26,'|',color='k')
 
     ax.plot(x_time,np.zeros_like(x_time),'--',color='k',alpha=0.5)
@@ -308,11 +310,12 @@ def plot_time_corrs(all_corrs, ax=None, w=10, save_path=None):
     ax.set_ylabel('pearson correlation')
     ax.set_title('neural and behavioral distance\ncorrelation time course')
     ax.legend()
-    ax.set_xlim(-0.5,1)
+    ax.set_xlim(-1,1)
     ax.set_ylim(-0.1,0.3)
     ax.set_yticks([-0.1,0,0.1,0.2,0.3],['',0,'','','.3'])
-    ax.set_xticks([-0.5,-0.25,0,0.25,0.5,0.75,1],['-.5','','0','','.5','','1'])
+    ax.set_xticks([-1,-0.75,-0.5,-0.25,0,0.25,0.5,0.75,1],['-1','','-0.5','','0','','0.5','','1'])
     ax.legend(frameon=False)
+    
     # change font color of legend
     leg = ax.get_legend()
     ltext  = leg.get_texts()
@@ -325,10 +328,10 @@ def plot_time_corrs(all_corrs, ax=None, w=10, save_path=None):
     if save_path is not None:
         plt.savefig(save_path, dpi=300)
 
-def plot_all_regions(all_corrs, w=10, save_path=None):
+def plot_all_regions(all_corrs, w=10, s=1, save_path=None):
     colors = {'VISa':'#03A6A6', 'CA1':'#88D94E', 'DG':'#88D94E', 'LP':'#F28D9F', 'PO':'#F28D9F'}
 
-    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(10, 6))
+    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8, 6))
     
     for region, all_corrs_region in all_corrs.items():
         x_time = np.linspace(-1, 1, len(all_corrs_region[0]))
