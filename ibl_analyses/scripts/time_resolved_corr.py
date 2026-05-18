@@ -10,6 +10,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from utils import plot_time_corrs, load_and_process_fold
+
 def main(args):
 
     w, s = 15, 2
@@ -32,11 +33,12 @@ def main(args):
     else:
         all_corrs = {}
         for region in args.region:
-            logger.info(f"Submitting response and stimulus for region: {region}")
+            logger.info(f"Submitting response for region: {region}")
             all_corrs_resp = load_and_process_fold(region, 'response', w, s)
+            logger.info(f"Submitting stimulus for region: {region}")
             all_corrs_stim = load_and_process_fold(region, 'stim', w, s)
             
-            all_corrs[region] = (all_corrs_resp, all_corrs_stim)
+            all_corrs[region] = {'response': all_corrs_resp, 'stim': all_corrs_stim}
     
     #ray.shutdown()
 
