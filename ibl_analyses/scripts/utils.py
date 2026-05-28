@@ -113,9 +113,9 @@ def filter_region(ys, cs, r, regions, n_trials, min_neurons=50, min_trials=20):
                 n_trials.append(ys[i].shape[0])
             y_masked = ys[i][:, :, region_filter]
             y_mean = y_masked.mean(0)
-            neuron_std = y_mean.std(axis=0)
-            idx = np.argsort(neuron_std)[:100]
-            ys_aux.append(y_masked[:, :, idx].mean(0))
+            #neuron_std = y_mean.std(axis=0)
+            #idx = np.argsort(neuron_std)[:100]
+            ys_aux.append(y_masked.mean(0))
             cs_masked = np.array(cs[i])
             cs_masked = np.where(cs_masked == -1, 0, 1)
             cs_aux.append(cs_masked.mean(0))
@@ -326,39 +326,45 @@ def plot_time_corrs(all_corrs, ax=None, w=10, s=1, save_path=None):
     #fig.tight_layout()
 
     if save_path is not None:
-        plt.savefig(save_path, dpi=300)
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+
+    return ax
 
 def plot_all_regions(all_corrs, w=10, s=1, save_path=None):
-    colors = {'VISa':'#03A6A6', 'CA1':'#88D94E', 'DG':'#88D94E', 'LP':'#F28D9F', 'PO':'#F28D9F'}
+    colors = {'VISa':'#03A6A6', 'CA1':'#88D94E', 'DG':'#4ED97D', 'LP':'#F28D9F', 'PO':'#F2AB8D'}
+    
+    # Calculate time axis based on actual data length
+    # 150 is the number of time bins i sorted data 
+    idx = np.array(list(range(0, 150 - w, s)))
+    x_time = np.linspace(-1, 1, 150)
+    diff = np.diff(x_time)[0] * w / 2
+    x_time = x_time[idx] + diff
 
-    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8, 6))
+    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6, 5))
     
     for region, all_corrs_region in all_corrs.items():
-        x_time = np.linspace(-1, 1, len(all_corrs_region[0]))
-        x_time += np.diff(x_time)[0] * w
         
         color = colors.get(region, '#000000')  # Default to black if region not in colors dict
         
-        ax.plot(x_time, np.nanmean(all_corrs_region, 0), color=color, linewidth=2, label=region)
+        mean_corr = np.nanmean(all_corrs_region, 0)
+        ax.plot(x_time, mean_corr, color=color, linewidth=2, label=region)
         ax.fill_between(x_time, 
-                       [np.nanpercentile(a, 2.5) for a in all_corrs_region.T], 
-                       [np.nanpercentile(a, 97.5) for a in all_corrs_region.T],
+                       [np.nanpercentile(a, 5) for a in all_corrs_region.T], 
+                       [np.nanpercentile(a, 95) for a in all_corrs_region.T],
                        color=color, alpha=0.2)
     
     ax.plot(x_time, np.zeros_like(x_time), '--', color='k', alpha=0.5)
     ax.set_xlabel('time from alignment (s)')
     ax.set_ylabel('pearson correlation')
     ax.set_title('neural and behavioral distance\ncorrelation time course by region')
-    ax.set_xlim(-0.5, 1)
-    ax.set_ylim(-0.1, 0.3)
-    ax.set_yticks([-0.1, 0, 0.1, 0.2, 0.3], ['', 0, '', '', '.3'])
-    ax.set_xticks([-0.5, -0.25, 0, 0.25, 0.5, 0.75, 1], ['-.5', '', '0', '', '.5', '', '1'])
+    ax.set_xlim(-1,1)
+    ax.set_ylim(-0.1,0.35)
+    ax.set_yticks([-0.1,0,0.1,0.2,0.35],['',0,'','','.35'])
+    ax.set_xticks([-1,-0.75,-0.5,-0.25,0,0.25,0.5,0.75,1],['-1','','-0.5','','0','','0.5','','1'])
     ax.legend(frameon=False, loc='upper left')
     sns.despine()
     
     if save_path is not None:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
 
-    plt.show()
-    
     return fig, ax
