@@ -4,8 +4,10 @@
 @author: Amin
 """
 
+import gc
+import os
+import time
 import numpy as np
-
 
 from iblatlas.regions import BrainRegions
 from iblatlas.atlas import AllenAtlas
@@ -17,6 +19,7 @@ from pathlib import Path
 import pandas as pd
 from typing import Dict
 import warnings
+import psutil
 import ray
 import tqdm
 #import ibl_analyses.scripts.utils as utils
@@ -31,7 +34,7 @@ warnings.filterwarnings(
     category=DeprecationWarning
 )
 
-
+#os.environ['REVISION_LAST_BEFORE'] = '2024-05-06'
 # %%
 class IBLSession:
     def __init__(self,params):
@@ -58,15 +61,15 @@ class IBLSession:
         self.one = ONE(
             base_url="https://openalyx.internationalbrainlab.org", 
             password="international", 
-            silent=True, 
+            silent=False, 
             cache_dir=cache_dir,
             mode=self.mode
         )
         
         self.brain_atlas = AllenAtlas()
 
-        self.load_session()
-        self.load_session_data()
+        #self.load_session()
+        #self.load_session_data()
 
     def check_rep(self,spikes,clusters):
          # spikes.clusters provides ids which match clusters['cluster_id']
@@ -77,9 +80,13 @@ class IBLSession:
         assert len(clusters['cluster_id']) == len(np.unique(clusters['cluster_id']))
         return
 
-
+    
     def load_session(self):
         if self.params["verbose"]: print("loading session: ", self.eid)
+
+        # save data origin
+        details = self.one.get_details(self.eid)
+        self.lab = details['lab']
         
         trials = self.one.load_object(self.eid,'trials',collection='alf')
         try:
@@ -89,38 +96,40 @@ class IBLSession:
                 one=self.one, 
                 atlas=self.brain_atlas
             )
-            spikes, clusters, channels = sl.load_spike_sorting()
+            
+            print("Loading spike sorting for session ", self.eid)
+
+            spikes, clusters, channels = sl.load_spike_sorting()  # enforce_version=True was breaking it... , good_units=True alo breaks it 
+            
+            # TODO: maybe try to recompute cluster metrics in one specific data and see if impacts on smth
             clusters = sl.merge_clusters(spikes, clusters, channels)
             self.check_rep(spikes, clusters)
             probe_data = dict(spikes=spikes, clusters=clusters, channels=channels)
         except:
+            #print(f"Could not load spike sorting for session {self.eid}")
             probe_data = []
         
         self.data = {'trials':trials,self.params['probe']:probe_data}
         return self.data
-    
-    
+
     def load_session_data(self):
         if self.params["verbose"]: print("loading session data: ", self.eid)
-        
         spikes, clusters, channels = self.data[self.params['probe']].values()
-
-        print('Len clusters: ', len(clusters))
+        print('Number of clusters: ',len(clusters))
 
         trials = self.data['trials']
 
         bin_size = (self.params['post_time']+self.params['pre_time'])/self.params['n_bins']
 
-        acronym_allen = self.data[self.params['probe']]['clusters']['acronym']
-        acronym_beryl = BrainRegions().acronym2acronym(acronym_allen, 'Beryl')
-
-        acronym_bool = np.isin(acronym_beryl, self.params['areas'])
-
+        # Pull trials according to the probability block
         if 'prior' in self.params.keys(): #.2, .5, .8
             trial_indices = trials.probabilityLeft == self.params['prior']
         else:
-            trial_indices = trials.probabilityLeft !=.5# exclude 50-50 trials
-        
+            #trial_indices = trials.probabilityLeft !=.5# exclude 50-50 trials
+            # use all trials
+            trial_indices = trials.probabilityLeft !=.6
+
+        # Pull spike_counts around params['align_to'] event
         y, t = brainbox.singlecell.bin_spikes2D(
             spike_times=spikes.times, 
             spike_clusters=spikes.clusters, 
@@ -131,99 +140,110 @@ class IBLSession:
             bin_size=bin_size
         )
         
-        y = y[:,acronym_bool,:]
+        # If you pass explicitly the areas, select them
+        acronym_allen = self.data[self.params['probe']]['clusters']['acronym']
+        acronym_beryl = BrainRegions().acronym2acronym(acronym_allen, 'Beryl')
+        
+        if self.params['areas'] is not None:
+            acronym_bool = np.isin(acronym_beryl, self.params['areas'])
+            y = y[:,acronym_bool,:]
+            regions = acronym_beryl[acronym_bool]
+        else:
+            regions = acronym_beryl
+
         reaction_times = trials['response_times'] - trials['stimOn_times']
         correct = trials['feedbackType']
+
+        # Select these trials
+        reaction_times = reaction_times[trial_indices]
+        correct = correct[trial_indices]
+        y = y[trial_indices]
+
+        #print(y.shape) (sum(trials[c]) for c in contrast, n_neurons, n_time_bins)
         
+        # Find which trials correspond to which contrast
+        # Also returns list of unique contrasts and number of trials for each contrast
         contrast = np.diff(
             np.nan_to_num(np.c_[trials['contrastLeft'], trials['contrastRight']])
         )*100
 
-        reaction_times = reaction_times[trial_indices]
-        correct = correct[trial_indices]
-        y = y[trial_indices]
-        contrast = contrast[trial_indices]
+        # Select contrast of the used trials
+        #contrast = contrast[trial_indices]
+        contrast = contrast[trial_indices].flatten()
 
-        x, indices, counts = np.unique(
+        contrasts, indices, counts = np.unique(
             contrast,axis=0,
             return_inverse=True,
             return_counts=True
         )
-        n_trials = min(counts)
 
+        #n_trials = min(counts) # get, for each condition, the min number of trials
+
+        n_conditions = contrasts.shape[0]
+        n_time_bins = len(t)
+        n_neurons = y.shape[1]
+
+        # Optimizing the array construction
         if self.params['bins_as_conds']:
-            y = np.array([
-                [y[j][:,t_]
-                for j in np.where(indices==i)[0][:n_trials].tolist()] 
-                for i in range(x.shape[0]) for t_ in range(len(t))]
-            ).transpose(1,0,2)
-        
+            
+            # Instead of getting min_trials, get max_trials and pad the rest with nans to not discard trials 
+            n_trials = np.array([sum(contrast == c) for c in contrasts])
+            # Get max number of trials for each condition
+            padding = max(n_trials) - n_trials
+
+            y = np.dstack(np.array(
+                [np.array([
+                    np.vstack((yx, np.full((padding[c],self.params['n_bins']), np.nan))) 
+                    for yx in y[contrast==contrasts[c],:,:].transpose(1,0,2)])
+                    for c in range(len(contrasts))])).transpose(1, 2, 0)     
+
+            print(y.shape) # (n_trials, n_conditons*n_time_bins, n_neurons)  
+
         else:
+            n_trials = np.array([sum(contrast == c) for c in contrasts])
+            padding = max(n_trials) - n_trials
+
             y = np.array([
-                [y[j]
-                for j in np.where(indices==i)[0][:n_trials].tolist()] 
-                for i in range(x.shape[0])]
-            ).transpose(1,0,3,2)
+                np.vstack((
+                    y[np.where(indices==i)[0], :, :],
+                    np.full((padding[i], y.shape[1], y.shape[2]), np.nan) # complete with nans to max trials 
+                ))
+                for i in range(contrasts.shape[0])
+            ]).transpose(1, 0, 3, 2)
+            
+            print(y.shape)    # (n_trials, n_conditions, n_time_bins, n_neurons)
 
-        reaction_times = np.array([
+                
+        reaction_times = list_to_array([
             [reaction_times[j]
-            for j in np.where(indices==i)[0][:n_trials].tolist()] 
-            for i in range(x.shape[0])]
-        ).T
-        correct = np.array([
+            for j in np.where(indices==i)[0].tolist()] 
+            for i in range(contrasts.shape[0])]).T
+        correct = list_to_array([
             [correct[j]
-            for j in np.where(indices==i)[0][:n_trials].tolist()] 
-            for i in range(x.shape[0])]
-        ).T
-        
-        
-        x = np.array([[x_,t_] for x_ in x.squeeze() for t_ in t])
+            for j in np.where(indices==i)[0].tolist()] 
+            for i in range(contrasts.shape[0])]).T
 
-        #y = np.sqrt(
-        #    y[:,:,np.argsort(y.mean(0).var(0))[::-1]]
-        #)
+        x = np.array([[x_,t_] for x_ in contrasts.squeeze() for t_ in t])
 
         if self.params['n_trials'] is not None:
             y = y[:self.params['n_trials']]
         
         if self.params['n_neurons'] is not None:
             y = y[:,:,:self.params['n_neurons']]
-
-        if self.params['bins_as_conds']:
-
-            self.data = split_data_cv({
-                    'y':y,
-                    'reaction_times':reaction_times[:self.params['n_trials'],:],
-                    'correct':correct[:self.params['n_trials'],:],
-                },
-                self.params['props'],
-                self.params['seeds']
-            )
-        else:
-            
-            keys = ['y_train', 'y_test', 'y_validation', 'reaction_times_train', 
-                    'reaction_times_test', 'reaction_times_validation', 'correct_train', 
-                    'correct_test', 'correct_validation'] # nasty, improve this
-            
-            self.data = {key: [] for key in keys}
-            for ti in range(len(t)):
-                cv_data = split_data_cv({
-                        'y':y[:,:,ti],
-                        'reaction_times':reaction_times[:self.params['n_trials'],:],
-                        'correct':correct[:self.params['n_trials'],:],
-                    },
-                    self.params['props'],
-                    self.params['seeds']
-                )
-                for k in keys:
-                    self.data[k].append(cv_data[k])
             
         self.y = y
         self.x = x
         self.reaction_times = reaction_times
         self.correct = correct
-        
-    def new_fold(self,seeds=None):
+        self.regions = regions
+
+        gc.collect()
+
+    def new_fold(self, seeds=None):
+        """
+        Generate a new fold if cross-validation
+        """
+
         # TODO: Might be better to enforce the user to determine the seed
         if seeds is None:
             seeds = {
@@ -232,23 +252,23 @@ class IBLSession:
                 'validation': np.random.randint(0,10000)
             }
         if self.params['bins_as_conds']:
-
             self.data = split_data_cv({
                     'y':self.y,
                     'reaction_times':self.reaction_times[:self.params['n_trials'],:],
                     'correct':self.correct[:self.params['n_trials'],:],
                 },
                 self.params['props'],
-                seeds
+                seeds, 
             )
         else:
             
-            keys = ['y_train', 'y_test', 'y_validation', 'reaction_times_train', 
-                    'reaction_times_test', 'reaction_times_validation', 'correct_train', 
-                    'correct_test', 'correct_validation'] # nasty, improve this
+            keys = ['y_train', 'y_test', 'y_validation', 
+                    'reaction_times_train', 'reaction_times_test', 'reaction_times_validation', 
+                    'correct_train', 'correct_test', 'correct_validation'] # nasty, improve this
             
             self.data = {key: [] for key in keys}
             for ti in range(self.y.shape[2]):
+                # For each time bin, split on 2 folds and concatenate after
                 cv_data = split_data_cv({
                         'y':self.y[:,:,ti],
                         'reaction_times':self.reaction_times[:self.params['n_trials'],:],
@@ -260,8 +280,13 @@ class IBLSession:
                 for k in keys:
                     self.data[k].append(cv_data[k])
 
+    ## Aded in case of no cross-validation
+    def load_data(self):
+        return self.x, self.data['y'], self.data['reaction_times'], self.data['correct'], self.regions
+
+    # Helper method for cross-validation
     def load_train_data(self):
-        return self.x, self.data['y_train'], self.data['reaction_times_train'], self.data['correct_train']
+        return self.x, self.data['y_train'], self.data['reaction_times_train'], self.data['correct_train'], self.regions
 
     def load_train_data_avg(self):
         if self.params['bins_as_conds']:
@@ -276,10 +301,10 @@ class IBLSession:
         return np.mean(self.data['y_test'],1), np.mean(self.data['correct_test'],1)
     
     def load_test_data(self):
-        return self.x, self.data['y_test'], self.data['reaction_times_test'], self.data['correct_test']
+        return self.x, self.data['y_test'], self.data['reaction_times_test'], self.data['correct_test'], self.regions
     
     def load_validation_data(self):
-        return self.x, self.data['y_validation'], self.data['reaction_times_validation'], self.data['correct_validation']
+        return self.x, self.data['y_validation'], self.data['reaction_times_validation'], self.data['correct_validation'], self.regions
 
     
 # %%
@@ -304,25 +329,36 @@ class IBLDataLoader:
             mode=self.mode
         )
 
-        bwm_sessions = one.alyx.rest(
-            'sessions', 'list', dataset_types='spikes.times', tag=params['tag']
-        )
+        if self.mode != 'local':
+            print("Refreshing local cache tables...")
+            # This downloads sessions.pqt and datasets.pqt to cache_dir 
+            # It is important for me to be able to load form remote 
+            one.load_cache()
 
-        df = pd.DataFrame(bwm_sessions)
-        if eids is None:
-            eids = list(df['id']) if params['sessions'] is None else [list(df['id'])[s] for s in params['sessions']]
+            bwm_sessions = one.alyx.rest(
+                'sessions', 'list', dataset_types='spikes.times', tag=params['tag']
+            )
+
+            df = pd.DataFrame(bwm_sessions)
+            if eids is None:
+                eids = list(df['id']) if params['sessions'] is None else [list(df['id'])[s] for s in params['sessions']]
+
+        # Filter 
 
         self.eids = eids
         self.probe = params['probe']
         self.areas = params['areas']
+        self.labs = [] # save lab info
 
         self.parallel = parallel
 
         if parallel:
             ray.init(
                 ignore_reinit_error=True,
-                runtime_env={'working_dir': '../'}
+                runtime_env={'working_dir': '../'},
+                num_cpus=max(1, os.cpu_count() - 1)
             )
+
             self.sessions = [
                 IBLSessionRemote.remote(
                     {**params,**{'eid':eid}}
@@ -338,19 +374,34 @@ class IBLDataLoader:
 
 
         else:
-            self.sessions = [
-                IBLSession(
-                    {**params,**{'eid':eid}}
-                ) for eid in eids
-            ]
-            self.data = [sess.load_session() for sess in self.sessions]
-            [sess.load_session_data() for sess in self.sessions]
+            # Uploading this logic for better performance (try)
 
-        valid = [i for i in range(len(self.data)) if bool(self.data[i][params['probe']])]
-        self.eids = [eids[i] for i in valid]
-        self.sessions = [self.sessions[i] for i in valid]
-        self.data = [self.data[i] for i in valid]
+            self.sessions = []
+            self.eids = []
+            for eid in tqdm.tqdm(eids, "Loading session"):
 
+                # create session
+                sess = IBLSession({**params,**{'eid':eid}})
+
+                sess.load_session()
+
+                if bool(sess.data[params['probe']]): 
+                    self.sessions.append(sess)
+                    self.eids.append(eid)
+                    self.labs.append(sess.lab)
+                    sess.load_session_data()
+                else:
+                    print(f"Skipping empty session {eid}")
+                    del sess
+
+                gc.collect()
+
+        self.data = None 
+        #self.eids = [s.eid for s in self.sessions]
+        print(f"Successfully loaded {len(self.sessions)} sessions.")
+    
+    def load_data(self):
+        return zip(*[sess.load_data() for sess in self.sessions])
 
     def load_train_data(self):
         if self.parallel: 
@@ -384,12 +435,24 @@ class IBLDataLoader:
     def new_folds(self,n_folds=10,seeds=None):
         all_train_data=[]
         all_test_data=[]
-        for _ in range(n_folds):
+        for i in range(n_folds):
             [sess.new_fold(seeds) for sess in self.sessions]
             all_train_data.append(self.load_train_data())
             all_test_data.append(self.load_test_data())
 
         return all_train_data, all_test_data
+
+    
+    def generate_folds(self, n_folds=10, seeds=None):
+            # Memory-efficient generator..
+
+            for i in range(n_folds):
+                #_log_mem('Track memory usage generating folds')
+                t0 = time.time()
+                [sess.new_fold(seeds) for sess in self.sessions]
+                t1 = time.time()
+                #print('Time taken :', t1-t0)
+                yield self.load_train_data(), self.load_test_data()
     
     def new_folds_avg(self,n_folds=10,seeds=None):
         all_train_data=[]
@@ -423,12 +486,16 @@ def split_data_cv(data,props,seeds):
 
     test_trials = trial_indices[-int(props['test']*N):]
 
+    #print("Test indices: ", test_trials)
+
     train_trials = jax.random.choice(
         jax.random.PRNGKey(seeds['validation']),
         shape=(int(N*props['train']),),
         a=trial_indices[:-int(props['test']*N)],
         replace=False
     ).sort()
+
+    #print("Train indices: ", train_trials)
 
     validation_trials = np.setdiff1d(trial_indices[:-int(props['test']*N)],train_trials).tolist()
 
@@ -439,3 +506,16 @@ def split_data_cv(data,props,seeds):
         out[k+'_validation'] = data[k][validation_trials,...]
     
     return out
+
+def list_to_array(list):
+    # From Andrew's code
+    # He gets the maximum number of trials and completes the minimum with nans
+
+    max_len = max(len(row) for row in list)
+
+    for i in range(len(list)):
+        list[i] = list[i] + (max_len - len(list[i])) * [np.nan]
+                             
+    return np.array(list)
+
+

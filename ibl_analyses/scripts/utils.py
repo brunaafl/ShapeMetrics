@@ -286,8 +286,8 @@ def plot_time_corrs(all_corrs, ax=None, w=10, s=1, save_path=None):
     # I think what i was doing is wrong, now im centering the time bins in the middle of the window and accounting for stride
     idx = np.array(list(range(0,150-w,s)))
     x_time = np.linspace(-1,1,150)
-    diff = np.diff(x_time)[0]*w/2
-    x_time = x_time[idx]+diff
+    diff = np.diff(x_time)[0] * w / 2 # Centering time bins to the middle of the window
+    x_time = x_time[idx] #+ diff
 
     sig = {}
 
@@ -337,8 +337,8 @@ def plot_all_regions(all_corrs, w=10, s=1, save_path=None):
     # 150 is the number of time bins i sorted data 
     idx = np.array(list(range(0, 150 - w, s)))
     x_time = np.linspace(-1, 1, 150)
-    diff = np.diff(x_time)[0] * w / 2
-    x_time = x_time[idx] + diff
+    diff = np.diff(x_time)[0] * w / 2 # Centering time bins to the middle of the window
+    x_time = x_time[idx] #+ diff
 
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6, 5))
     

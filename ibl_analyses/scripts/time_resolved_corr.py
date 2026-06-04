@@ -33,17 +33,17 @@ def main(args):
     else:
         all_corrs = {}
         for region in args.region:
-            # For the individual regions, just doing it for the response to make the plot a bit cleaner
-            logger.info(f"Submitting response for region: {region}")
-            all_corrs_resp = load_and_process_fold(region, 'response', w=w, s=s)
-            all_corrs[region] = all_corrs_resp
+            # For the individual regions, just doing it for the stimulus to make the plot a bit cleaner
+            logger.info(f"Submitting stimulus for region: {region}")
+            all_corrs_stim = load_and_process_fold(region, 'stim', w=w, s=s)
+            all_corrs[region] = all_corrs_stim
 
-        plot_all_regions(all_corrs, w=w, s=s, save_path='time_corrs_all_regions_response.svg')
+        plot_all_regions(all_corrs, w=w, s=s, save_path='time_corrs_all_regions_stim.svg')
         logger.info("Finished plotting results.")
     #ray.shutdown()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--region", type=list, default=['CA1','DG','LP','PO','VISa'])
+    parser.add_argument("--region", type=list, default=['all'])
     args = parser.parse_args()
     main(args)

@@ -6,10 +6,10 @@ import sys
 import pickle
 
 import utils
-import loader_modif
+import ibl_analyses.scripts.loader as loader
 import tqdm
 import imp
-imp.reload(loader_modif)
+imp.reload(loader)
 import setup
 import scipy.stats as sts
 from matplotlib import pyplot as plt
@@ -49,7 +49,7 @@ params = {
     }
 
 
-dataloader = loader_modif.IBLDataLoader(
+dataloader = loader.IBLDataLoader(
          params,eids=setup.all_eids
 )
 
