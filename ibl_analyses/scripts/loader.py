@@ -237,6 +237,11 @@ class IBLSession:
         self.correct = correct
         self.regions = regions
 
+        # Add to data for easier access
+        self.data['y'] = y
+        self.data['reaction_times'] = reaction_times
+        self.data['correct'] = correct
+
         gc.collect()
 
     def new_fold(self, seeds=None):
