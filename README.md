@@ -1,13 +1,24 @@
 
-Analyses of three datasets using shape metrics.
+Analyses of four datasets using shape metrics.
 
-1. siegel_analyses/
+
+1. duszkiewicz_analyses/
+
+    **Local origin of excitatory–inhibitory tuning equivalence in a cortical network**
+   
+    Adrian J. Duszkiewicz, Pierre Orhan, Sofia Skromne Carrasco, Eleanor H. Brown, Eliott Owczarek, Gilberto R. Vite, Emma R. Wood & Adrien Peyrache 
+
+    https://www.nature.com/articles/s41593-024-01588-5
+
+
+2. siegel_analyses/
 
     ***Cortical information flow during flexible sensorimotor decisions***
    
     MARKUS SIEGEL , TIMOTHY J. BUSCHMAN, AND EARL K. MILLER
 
     https://www.science.org/doi/10.1126/science.aab0551
+
 
 3. ibl_analyses/
 
@@ -17,11 +28,11 @@ Analyses of three datasets using shape metrics.
 
     https://www.biorxiv.org/content/10.1101/2022.05.09.491042v6.full
 
+4. ibl_autism/
 
-5. duszkiewicz_analyses/
+    ***A common computational and neural anomaly across mouse models of autism***
 
-    **Local origin of excitatory–inhibitory tuning equivalence in a cortical network**
-   
-    Adrian J. Duszkiewicz, Pierre Orhan, Sofia Skromne Carrasco, Eleanor H. Brown, Eliott Owczarek, Gilberto R. Vite, Emma R. Wood & Adrien Peyrache 
+    Jean-Paul Noel, Edoardo Balzani, Luigi Acerbi, Julius Benson, The International Brain Laboratory, Cristina Savin & Dora E. Angelaki 
 
-    https://www.nature.com/articles/s41593-024-01588-5
+    https://www.nature.com/articles/s41593-025-01965-8
+

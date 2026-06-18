@@ -218,6 +218,7 @@ __marimo__/
 # Folders to ignore
 /ibl_analyses/*data*
 /ibl_autism/data*
+ibl_figure.ipynb
 
 # Files to be ignored
 *.h5
