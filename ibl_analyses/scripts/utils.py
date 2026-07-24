@@ -371,3 +371,138 @@ def plot_all_regions(all_corrs, w=10, s=1, save_path=None):
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
 
     return fig, ax
+
+#%%
+# Get neura and behavioral distances 
+
+def convert_choose_right(cs):
+    contrasts = np.array([-100, -25, -12.5, -6.25, 0., 6.25, 12.5, 25., 100.])
+    
+    percent_right = np.empty((len(cs), len(contrasts)))
+
+    for ii, percent_correct in enumerate(cs):
+        # Convert to percent choose right
+        percent_right[ii,:] = np.hstack((1-percent_correct[contrasts < 0],
+                                percent_correct[contrasts >= 0]))
+        
+    return percent_right
+
+def fit_psychmetric(cs, n_trials_total=None, dx=0.1):
+    # Fit psychometric curves to each session
+    contrasts = np.array([-100, -25, -12.5, -6.25, 0., 6.25, 12.5, 25., 100.])
+    psym_pars = np.empty((len(cs), 4)) # psychometric parameters
+    
+    percent_right = np.empty((len(cs), len(contrasts)))
+
+    xx = np.arange(-100, 100, dx)
+    fit_curve = np.zeros((len(cs), len(xx)))
+
+    for ii, percent_correct in enumerate(cs):
+        """
+        # Rempve since im converting to percent correct before
+        behavior[behavior == -1] = 0
+        percent_correct = np.nanmean(behavior == 1, axis=0)"""
+
+        # Convert to percent choose right
+        percent_right[ii,:] = np.hstack((1-percent_correct[contrasts < 0],
+                                percent_correct[contrasts >= 0]))
+
+        if n_trials_total is None:
+            n_trials = [np.sum(~np.isnan(x)) for x in percent_correct.T]
+        else:
+            n_trials = [n_trials_total[ii]] * len(contrasts)
+
+        # Format data for mle_fit_psycho
+        # Row 1: conditions
+        # Row 2: number of trials per condition
+        # Row 3: percent left in each condition
+        data = np.vstack((
+            contrasts,
+            n_trials,
+            percent_right[ii,:]
+        ))
+
+        parmin = np.array([-20, -50, 0, 0])
+        parmax = np.array([20, 50, 1, 1])
+        psym_pars[ii,:], _ = \
+            psy.mle_fit_psycho(data,
+                               'erf_psycho_2gammas',
+                               nfits=15,
+                               parmin = parmin,
+                               parmax = parmax)
+        
+        fit_curve[ii,:] = psy.erf_psycho_2gammas(psym_pars[ii,:], xx)
+
+    return fit_curve, percent_right, psym_pars
+
+def compute_behavioral_distance(cs, n_trials_total):
+    fit_curve, percent_right, psycho_params = fit_psychmetric(cs, n_trials_total)
+
+    dist_behavioral = np.array(
+        [np.sqrt(np.sum((fit_curve[i,:] - fit_curve[j,:])**2 * 0.1))
+        for i in range(len(cs))
+        for j in range(len(cs))]).reshape(len(cs), len(cs))
+
+    return dist_behavioral, psycho_params, percent_right
+
+
+def get_dists(train_fold,test_fold=None, metric="area", n_trials_total=None):
+
+    ys,cs = train_fold
+    if test_fold is not None:
+        _,cs = test_fold
+
+    S = len(ys)
+
+    #compute distance matrices
+    # I can improve speed by only computing upper triangle and then symmetrizing
+    dist_neural_list = dsd([
+        [ys[i],ys[j]]
+        for i in range(len(ys)) 
+        for j in range(i+1,len(ys))]
+    ) # its a list, the shape is S*(S-1)/2
+
+    # symmetrize the distance matrix
+    dist_neural = np.zeros((S,S))
+    dist_neural[np.triu_indices(S,1)] = dist_neural_list
+    dist_neural = dist_neural + dist_neural.T
+
+    if metric=="sigmoid":
+        dist_cc,_,_ = compute_behavioral_distance(cs, n_trials_total=n_trials_total)
+    elif metric=="area":
+        corr_matrix = np.corrcoef(cs)
+        dist_cc = 1 - corr_matrix   
+    return dist_neural,dist_cc,cs
+
+def get_kneigh_decreasing(dist_neural,cs,S=10,W=2):
+    """
+    Compute the correlation between each subject behavior and average of the top K neighbors in neural space.
+    cs: list of behavioral functions for each subject
+    dist_neural: distance matrix between subjects in neural space
+    S: number of subjects
+    W: minimum number of neighbors to consider
+    returns all_preds_top: (Kmax-W+1, S)
+    """
+
+    avg_cc = np.array(cs)
+    all_preds_top = []
+
+    for K in range(W,S+1):
+        preds_top = []
+        for subj in range(S):
+            subj_idx = list(range(S))
+
+            # ignore itself
+            subj_idx.remove(subj)
+            subj_idx = np.array(subj_idx)
+
+            dists = dist_neural[subj][subj_idx]
+            sorted_idx  = subj_idx[np.argsort(dists)]
+
+            top_k = avg_cc[sorted_idx[K-W:K]]
+            preds_top.append(sts.pearsonr(np.mean(top_k,0),avg_cc[subj])[0])
+
+        all_preds_top.append(preds_top)
+
+    all_preds_top = np.array(all_preds_top)
+    return all_preds_top
