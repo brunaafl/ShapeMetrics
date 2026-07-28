@@ -17,9 +17,7 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import MDS, TSNE
 from scipy.cluster import hierarchy
 
-DATA_DIR = Path('/home/blopes/ShapeMetrics/ibl_autism/data/')
-BEHAVIOR_DIR = Path('/home/blopes/ShapeMetrics/ibl_autism/data_behavior/')
-
+from paths import DATA_DIR, BEHAVIOR_DIR
 #%%
 """
 Basic functions to list regions and animals for a given genotype
