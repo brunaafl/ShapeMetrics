@@ -316,7 +316,7 @@ def detect_outlier_subjects(kernel_list, mad_factor=3.0):
 #%% 
 # Plotting functions
 
-def plot_mds_pca(dist_matrix, labels, n_components=50, ax=None):
+def plot_mds_pca(dist_matrix, labels, n_components=50, ax=None, title=False):
 
     # DIstance matrices are not euclidean so PCA directly is not ideal
     # MDS on the distance matrix
@@ -347,7 +347,8 @@ def plot_mds_pca(dist_matrix, labels, n_components=50, ax=None):
                         c=colors[g], label=map_labels[g], s=60, edgecolors='white', linewidths=0.5)
     ax.set_xlabel(f'PC1 ({pca_2d.explained_variance_ratio_[0]*100:.1f}%)')
     ax.set_ylabel(f'PC2 ({pca_2d.explained_variance_ratio_[1]*100:.1f}%)')
-    ax.set_title('PCA on MDS embedding', fontsize=13, fontweight='bold')
+    if title:
+        ax.set_title('PCA on MDS embedding', fontsize=13, fontweight='bold')
     ax.legend()
 
     return ax, pca_coords
@@ -360,7 +361,7 @@ def plot_dendogram(dist_neural, labs, fig=None, save=False, lab_to_color=None, t
 
     linkage = hierarchy.ward(dist_neural_flat)
     linkage = hierarchy.optimal_leaf_ordering(linkage, dist_neural_flat)
-    
+
     if fig is None:
         fig = plt.figure(figsize=(4,5))
 
