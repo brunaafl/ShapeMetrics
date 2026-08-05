@@ -112,6 +112,11 @@ class IBLSession:
         self.data = {'trials':trials,self.params['probe']:probe_data}
         return self.data
 
+    def get_reaction_times(self):
+        trials = self.data['trials']
+        reaction_times = trials['response_times'] - trials['stimOn_times']
+        return reaction_times
+
     def load_session_data(self):
         if self.params["verbose"]: print("loading session data: ", self.eid)
         spikes, clusters, channels = self.data[self.params['probe']].values()
@@ -447,6 +452,8 @@ class IBLDataLoader:
 
         return all_train_data, all_test_data
 
+    def get_reaction_times(self):
+        return [sess.get_reaction_times() for sess in self.sessions]
     
     def generate_folds(self, n_folds=10, seeds=None):
             # Memory-efficient generator..

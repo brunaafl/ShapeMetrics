@@ -22,6 +22,9 @@ def main(args):
         all_corrs_resp = load_and_process_fold(region, 'response', w, s)
         logger.info("Submitting stimulus")
         all_corrs_stim = load_and_process_fold(region, 'stim', w, s)
+
+        # Save
+        np.savez(f'slided_time_corrs_{region}.npz', all_corrs_resp=all_corrs_resp, all_corrs_stim=all_corrs_stim)
         
         logger.info("Finished loading. Plotting results.")
 
